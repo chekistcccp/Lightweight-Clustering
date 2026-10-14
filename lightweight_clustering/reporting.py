@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 import json
 import math
 import os
+import subprocess
 from pathlib import Path
 import tempfile
 
@@ -105,12 +106,38 @@ def paired_differences(methods, rows, base="patch_knn"):
     return output
 
 
+def ensure_not_git_trackable(path):
+    """Inside a Git checkout, refuse to write result files unless ignored.
+
+    Prevents a custom --output path from producing an easily committed report.
+    Does not make Git itself a secure data store or disable a user's explicit
+    force-add / --no-verify overrides.
+    """
+    target = Path(path).resolve()
+    try:
+        run = subprocess.run(["git", "rev-parse", "--show-toplevel"],
+                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                             text=True, timeout=4, check=True)
+    except (OSError, subprocess.SubprocessError):
+        return
+    root = Path(run.stdout.strip()).resolve()
+    if not target.is_relative_to(root):
+        return  # External directory, outside local Git worktree.
+    result = subprocess.run(["git", "check-ignore", "-q", "--", str(target)],
+                            cwd=root, stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL, timeout=4)
+    if result.returncode != 0:
+        raise RuntimeError("Result would be Git-trackable: "+str(target)+
+                           ". Use outputs/ (ignored) or a directory outside the repository.")
+
+
 def export_report(target, *, methods, rows, metadata, diagnostics, timings,
                   splits, started_at, completed_at=None):
     """Atomic single-file export. Does not write any independent metric CSVs."""
     target = Path(target)
     if target.name != "experiment_results.json":
         raise ValueError("Canonical result filename must be experiment_results.json")
+    ensure_not_git_trackable(target)
     if not rows:
         raise ValueError("Cannot generate completed report without cases")
     if set(r["method"] for r in rows) != set(methods):
