@@ -1,0 +1,11 @@
+numpy>=1.26
+scipy>=1.11
+scikit-learn>=1.4
+nibabel>=5.2
+timm>=1.0.9
+modelscope>=1.22
+safetensors>=0.4
+tqdm>=4.66
+matplotlib>=3.8
+pytest>=8.0
+# torch + torchvision: install manually matching local CUDA/driver before pip install -r requirements.txt
