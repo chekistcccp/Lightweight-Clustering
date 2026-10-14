@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from lightweight_clustering.torc_approx import torque_approx, cluster_patient_support
+from lightweight_clustering.torc_approx import torque_approx, torque_from_distance, cluster_patient_support
 from lightweight_clustering.experiment import metric_one, balanced_reference
 
 
@@ -47,3 +47,21 @@ def test_metrics_edge_cases():
 def test_bad_matrix_guard():
     with pytest.raises(ValueError):
         torque_approx(np.ones((1025,3)))
+
+def test_direct_distance_interface():
+    from sklearn.metrics.pairwise import cosine_distances
+    x=np.random.default_rng(19).normal(size=(15,6))
+    a=torque_approx(x,fixed_k=3).labels
+    b=torque_from_distance(cosine_distances(x),fixed_k=3).labels
+    assert np.array_equal(a,b)
+
+
+def test_archive_traversal_blocked(tmp_path):
+    import zipfile
+    from lightweight_clustering.experiment import safe_extract
+    archive=tmp_path/"evil.zip"
+    with zipfile.ZipFile(archive,"w") as z:
+        z.writestr("../outside.txt","bad")
+    with pytest.raises(RuntimeError):
+        safe_extract(archive,tmp_path/"target")
+    assert not (tmp_path/"outside.txt").exists()
