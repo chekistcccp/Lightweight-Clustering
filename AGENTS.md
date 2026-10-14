@@ -22,3 +22,11 @@
 - 每项变更应更新 `tests/`，有确定性小型合成数据测试；数据未提供时只允许运行 smoke/unit test，不得假称在 MSD 上通过。
 - 不要同步 `data/`、`model/`、`outputs/`、`*.nii.gz`、凭据、代理配置、token、原始医学影像、conda 目录。
 - 本仓库面向学术研究，研究使用 TORC 时遵守原作者署名与 CC BY-NC-SA 4.0 非商业条款。
+
+## 实验结果唯一交接文件（必须执行）
+- 任何完整实验或调试实验只生成**一份需要人工回传的指标报告**：正式 `outputs/full/experiment_results.json`；调试 `outputs/debug_N/experiment_results.json`。JSON 含全部已实现数值指标、逐病例指标、聚类诊断、参数、患者拆分、时间、显存、版本与相对基线的配对差值。
+- JSON 必须**完全不包含** CT、NIfTI、像素掩码、可重建患者影像的特征数组、热力图/预测图像。默认不写预测 NPZ，`--save-predictions` 才允许本地保存。
+- **禁止以任何形式将用户实验结果同步至 GitHub**：包括 commit/push、PR/Issue 文本、Gist、GitHub Release、Actions artifact、workflow logs、文档表格或仓库的其他目录。不得把任何真实指标转写到 README、HANDOFF、AGENTS。只向用户指出本机 JSON 路径，让用户在当前 ChatGPT 网页**手动附加这个 JSON 文件**供分析。
+- 强制遵守 `.gitignore`；默认启用本地保护建议：`chmod +x .githooks/pre-commit && git config core.hooksPath .githooks`。代码会拒绝把结果写到 Git 可跟踪位置（结果仍不具备加密保障）。
+- 结果仅在全部病例和全部方法计算成功后原子写入；失败时不产生新的 completed JSON。不要把 debug subset 当正式统计结果，不能伪造缺失指标。
+- 每次修改报告结构要增加或修改 `tests/test_reporting.py` 与结果拦截测试，确保不含图像数组、没有遗漏患者/方法、不能外泄到 GitHub。
