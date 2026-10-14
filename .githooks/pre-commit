@@ -1,0 +1,4 @@
+#!/bin/sh
+# Enable once: git config core.hooksPath .githooks
+# Using python from the current environment; no network I/O.
+exec python scripts/check_staged.py
