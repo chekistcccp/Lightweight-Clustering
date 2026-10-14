@@ -12,8 +12,10 @@ def ct_body_mask(ct_slice: np.ndarray, size: int = 224, hu_threshold: float = -5
     if img.ndim != 2 or size < 16:
         raise ValueError("Expected 2D HU slice and output size >=16")
     # Nearest-neighbor, deterministic; image orientation same as CT backbone.
-    ys=np.rint(np.linspace(0,img.shape[0]-1,size)).astype(np.int64)
-    xs=np.rint(np.linspace(0,img.shape[1]-1,size)).astype(np.int64)
+    # Match torch.nn.functional.interpolate(..., mode="nearest") used for
+    # evaluation ground-truth masks; linspace endpoints would misalign ROI.
+    ys=np.minimum((np.arange(size)*img.shape[0]//size),img.shape[0]-1).astype(np.int64)
+    xs=np.minimum((np.arange(size)*img.shape[1]//size),img.shape[1]-1).astype(np.int64)
     hu=img[np.ix_(ys,xs)]
     foreground=np.isfinite(hu) & (hu>hu_threshold) & (hu<3500)
     foreground=ndi.binary_closing(foreground,structure=np.ones((3,3),dtype=bool),iterations=2)
