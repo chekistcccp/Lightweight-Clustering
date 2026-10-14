@@ -18,3 +18,11 @@
 - **重要**：尽管存在第三方旧版文本 MATLAB .m 镜像，当前正式官方仓库主算法仍发布为 P-code/MEX；其授权与当前官方版本存在差异风险。本仓库没有复制该第三方 MATLAB 文件。当前算法是 *TORC-inspired* 而非官方严格移植。
 - 下一步用户实验命令：激活自己的 Conda 环境、下载并放置 `Task10_Colon.tar` 到 `data/archives/`、自行安装相应 CUDA PyTorch，随后 `bash run.sh --max-cases 8` 做真实数据烟雾测试；无异常后 `bash run.sh --slice-stride 1` 完整运行。
 - 仍需由用户在 MATLAB 环境执行官方算法并提供 `golden.mat`，方能比较真实输出；即使单例 ARI=1 也不能声称完全移植。
+
+## 2026-10-14 用户结果回传需求（重要）
+- 改成唯一可回传的指标文件 `outputs/full/experiment_results.json`（调试模式 `outputs/debug_N/experiment_results.json`），包含所有当前计算的数值指标、逐病例记录、成对差值、簇诊断、版本、环境、分组、耗时和显存。
+- 默认不生成预测数组；`--save-predictions` 才可在本地保存 NPZ，不进入 JSON。
+- 报告生成在**所有方法成功结束后**；不生成独立指标 CSV/summary/run_manifest 文件。之前运行留下的老文件不会自动删除。
+- 新增 `reporting.py`、`tests/test_reporting.py`、`scripts/check_staged.py`、`.githooks/pre-commit`；Git 忽略策略扩展。Git hooks 启用前需用户在 WSL 执行 `chmod +x .githooks/pre-commit && git config core.hooksPath .githooks`。
+- **不得将任何真实实验结果提交 GitHub、写进 Issue/PR/日志/文档，也不能上传至 Actions Artifacts；只告知用户本机结果 JSON 路径，等用户手动回传本 ChatGPT 网页。**
+- 尚未在真实 MSD 数据集、ModelScope GPU 权重与 Windows WSL 环境进行完整运行；GitHub CI 仅验证代码语法及合成单元测试。
