@@ -35,7 +35,7 @@ def parser():
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--test-fraction", type=float, default=0.2)
     p.add_argument("--max-cases", type=int, default=0, help="debug subset only")
-    p.add_argument("--slice-stride", type=int, default=4, help="1 for all slices")
+    p.add_argument("--slice-stride", type=int, default=1, help="1 (default) evaluates every slice; >1 for quick exploratory runs")
     p.add_argument("--input-size", type=int, default=224)
     p.add_argument("--patch-grid", type=int, default=14)
     p.add_argument("--batch-size", type=int, default=16)
