@@ -9,18 +9,34 @@
 1. 用户自行创建并激活 Conda 环境。参考：`conda create -n lwcluster python=3.11 -y && conda activate lwcluster`。安装依赖：`pip install -r requirements.txt`；根据自身 CUDA 环境单独安装兼容 PyTorch，**run.sh 不修改环境**。
 2. 手动下载 **Medical Segmentation Decathlon Task10_Colon 原始压缩包**，直接放入 `data/archives/`（也支持 `data/` 根目录，tar / tar.gz / zip；不解压）。项目会自动、安全地解压，并定位 `imagesTr/labelsTr`。不要上传患者原始数据。
 3. 权重由代码通过 ModelScope 自动下载到 `model/`：已核实的模型仓库 `timm/tf_mobilenetv3_small_minimal_100.in1k`。网络可用时第一次运行自动获取；如果已放好原始 ModelScope 权重目录则跳过下载。
-4. `bash run.sh` 完成检查、解压、患者级划分、冻结特征缓存、共同参考集建库、三组实验、CSV/JSON 指标汇总；再次运行复用缓存。可通过 `bash run.sh --max-cases 8` 快速诊断（**限制病例仅用于调试，不用于论文结果**）。
+4. `bash run.sh` 完成检查、解压、患者级划分、冻结特征缓存、共同参考集建库、三组实验及**唯一指标汇总文件** `outputs/full/experiment_results.json`。再次运行复用特征缓存。可用 `bash run.sh --max-cases 8` 快速诊断（调试结果：`outputs/debug_8/experiment_results.json`，**不能作为正式论文结果**）。
 5. `python -m pytest -q` 验证算法级测试；`python scripts/matlab_parity.py --help` 说明 MATLAB 一致性验证流程。
 
 **所有运行参数：** `bash run.sh --help`。建议正式实验传入 `--slice-stride 1`，默认 `--slice-stride 4` 仅用于快速初验；指标明确报告评估覆盖的切片数和患癌阳性像素数。
 
-### 输出结构
-完整运行结果在 \`outputs/full/\`，\`--max-cases N\` 的调试运行在 \`outputs/debug_N/\`，二者严格隔离。下面的文件路径相对于该实验输出目录：
-- `outputs/split.json`：固定的患者级划分（seed 42），防止跨患者数据泄漏。
-- `outputs/cache/*.npz`：提取后的归一化 Patch 特征、切片索引；缓存与原始影像掩码分离。
-- `outputs/predictions/{method}/{patient}.npz`：每个患者的低分辨率得分图 + z 切片索引。
-- `outputs/metrics/per_case.csv`、`summary.json`：每方法逐例和总体 Pixel AUROC、AP、区域 Dice@top5%（辅助指标）以及时间等。
-- `outputs/torc_diagnostics.json`：簇数量、簇大小、支持患者数、归档算法参数。
+### 实验结果：只回传一个 JSON 文件（不会上传 GitHub）
+
+正式运行结束会打印绝对路径：
+
+```text
+outputs/full/experiment_results.json
+```
+
+**将这一个 JSON 文件手动作为附件上传回本 ChatGPT 网页即可。** 不需要压缩整个 outputs 目录，不需要上传 CT、NIfTI、掩码或热力图。报告包含：完整运行配置与版本、训练/测试患者划分、三种方法的**全部已实现数值指标**、每位患者的指标和 TP/FP/FN/TN、相对 Patch KNN 的配对差值、簇数/簇大小/跨患者覆盖率/merge torques、每阶段与每方法的用时及峰值 CUDA 显存、完整性和科研限制说明。
+
+当前已实现数值指标：Pixel AUROC、Pixel AP、Dice@top5%、IoU@top5%、Precision@top5%、Recall@top5%、FPR@top5%，以及样本量、阳性/阴性像素数、缺失指标情况。宏平均统计包含 mean/std/median/min/max/n。**未实现的 AUPRO 不会伪造数值；没有独立健康患者，所以没有病例级诊断 AUROC。**
+
+实验过程中的本地文件包括 `outputs/full/split.json` 与 `outputs/full/cache/`（运算缓存，不属于需要回传的实验指标）。默认**不保存预测图像/热力图**。只有显式加入 `--save-predictions` 才会额外存本地 `outputs/full/predictions/*.npz`，它们不会进入 JSON，且同样不能提交 Git。旧版本生成的 `metrics/*.csv`、`summary.json` 等文件不会被新版本重新生成，如本地还存在可自行删除。
+
+- `outputs/`、`data/`、`model/` 已被 Git 忽略，附加全路径忽略规则防止将 JSON 拷贝到仓库其他位置后误提交；**程序不调用 git add、commit、push，也不会创建 Release/Actions artifact。**
+- 可选的提交前保护（在 WSL 克隆的仓库内手动执行一次）：
+
+```bash
+chmod +x .githooks/pre-commit
+git config core.hooksPath .githooks
+```
+
+启用后正常 Git commit 会阻止暂存的实验指标、影像、模型文件；但用户主动使用 `--no-verify` 或 `git add -f` 仍可绕过部分保护，因此必须遵守 `AGENTS.md` 的**绝不上传结果**规则。
 
 ### 三个公平对照
 三组方法在**同一患者划分、同一预训练骨干、同一候选 Patch 集合**运行：
