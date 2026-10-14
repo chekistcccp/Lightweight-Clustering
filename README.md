@@ -3,13 +3,13 @@
 > **状态：研究原型 / 尚未在 MSD Colon 上验证。** 本项目的 `torc_approx` 是依论文思路独立编写的 **TORC-inspired 近似算法**，不是 2025 TPAMI 官方 MATLAB P-code 的严格翻译，更不代表通过 MATLAB 数值等价验证。不能以“官方 TORC Python 复现”对外宣称。
 
 ## 目标
-在**只有结直肠癌患者 CT、没有独立健康患者 CT**的条件下，使用冻结轻量视觉骨干 + 无训练聚类/近邻方法生成病灶异常热图。对照三种方法：`patch_knn`、`torc_approx`、`torc_consensus`。**不使用肿瘤标注构造特征库、选层、筛选切片、选择参数。**
+在**只有结直肠癌患者 CT、没有独立健康患者 CT**的条件下，使用冻结轻量视觉骨干 + 无训练聚类/近邻方法生成病灶异常热图。对照五组固定消融：`patch_knn`、`torc_approx`、`torc_consensus`。**不使用肿瘤标注构造特征库、选层、筛选切片、选择参数。**
 
 ### 上手（Windows WSL / 单张 GPU）
 1. 用户自行创建并激活 Conda 环境。参考：`conda create -n lwcluster python=3.11 -y && conda activate lwcluster`。安装依赖：`pip install -r requirements.txt`；根据自身 CUDA 环境单独安装兼容 PyTorch，**run.sh 不修改环境**。
 2. 手动下载 **Medical Segmentation Decathlon Task10_Colon 原始压缩包**，直接放入 `data/archives/`（也支持 `data/` 根目录，tar / tar.gz / zip；不解压）。项目会自动、安全地解压，并定位 `imagesTr/labelsTr`。不要上传患者原始数据。
 3. 权重由代码通过 ModelScope 自动下载到 `model/`：已核实的模型仓库 `timm/tf_mobilenetv3_small_minimal_100.in1k`。网络可用时第一次运行自动获取；如果已放好原始 ModelScope 权重目录则跳过下载。
-4. `bash run.sh` 完成检查、解压、患者级划分、冻结特征缓存、共同参考集建库、三组实验及**唯一指标汇总文件** `outputs/full/experiment_results.json`。再次运行复用特征缓存。可用 `bash run.sh --max-cases 8 --slice-stride 4` 快速诊断（调试结果：`outputs/debug_8/experiment_results.json`，**不能作为正式论文结果**）。
+4. `bash run.sh` 完成检查、解压、患者级划分、冻结特征缓存、共同参考集建库、五组消融及**唯一指标汇总文件** `outputs/full/experiment_results.json`。再次运行复用特征缓存。可用 `bash run.sh --max-cases 8 --slice-stride 4` 快速诊断（调试结果：`outputs/debug_8/experiment_results.json`，**不能作为正式论文结果**）。
 5. `python -m pytest -q` 验证算法级测试；`python scripts/matlab_parity.py --help` 说明 MATLAB 一致性验证流程。
 
 **所有运行参数：** `bash run.sh --help`。默认 `--slice-stride 1` 对全部切片评估；快速初验请显式传入 `--max-cases 8 --slice-stride 4`；指标明确报告评估覆盖的切片数和患癌阳性像素数。
@@ -22,9 +22,9 @@
 outputs/full/experiment_results.json
 ```
 
-**将这一个 JSON 文件手动作为附件上传回本 ChatGPT 网页即可。** 不需要压缩整个 outputs 目录，不需要上传 CT、NIfTI、掩码或热力图。报告包含：完整运行配置与版本、训练/测试患者划分、三种方法的**全部已实现数值指标**、每位患者的指标和 TP/FP/FN/TN、相对 Patch KNN 的配对差值、簇数/簇大小/跨患者覆盖率/merge torques、每阶段与每方法的用时及峰值 CUDA 显存、完整性和科研限制说明。
+**将这一个 JSON 文件手动作为附件上传回本 ChatGPT 网页即可。** 不需要压缩整个 outputs 目录，不需要上传 CT、NIfTI、掩码或热力图。报告包含：完整运行配置与版本、训练/测试患者划分、五种方法的**全部已实现数值指标**、每位患者的指标和 TP/FP/FN/TN、相对 Patch KNN 的配对差值、簇数/簇大小/跨患者覆盖率/merge torques、每阶段与每方法的用时及峰值 CUDA 显存、完整性和科研限制说明。
 
-当前已实现数值指标：Pixel AUROC、Pixel AP、Dice@top5%、IoU@top5%、Precision@top5%、Recall@top5%、FPR@top5%，以及样本量、阳性/阴性像素数、缺失指标情况。宏平均统计包含 mean/std/median/min/max/n。**未实现的 AUPRO 不会伪造数值；没有独立健康患者，所以没有病例级诊断 AUROC。**
+当前已实现数值指标：**全图 + HU 体部 ROI** 的 Pixel AUROC、Pixel AP；预先固定 Top0.1%、Top0.5%、Top1%、Top5% 的 Dice、IoU、Precision、Recall、FPR 和 TP/FP/FN/TN；每病例体部占比、体部 GT 肿瘤覆盖、21 个数值 PR 点。提供病例 macro mean/std/median/min/max/n、配对 delta、分簇诊断、用时及峰值显存。没有实现的 AUPRO 和患者级正常/癌症 AUROC 不会被伪造。
 
 实验过程中的本地文件包括 `outputs/full/split.json` 与 `outputs/full/cache/`（运算缓存，不属于需要回传的实验指标）。默认**不保存预测图像/热力图**。只有显式加入 `--save-predictions` 才会额外存本地 `outputs/full/predictions/*.npz`，它们不会进入 JSON，且同样不能提交 Git。旧版本生成的 `metrics/*.csv`、`summary.json` 等文件不会被新版本重新生成，如本地还存在可自行删除。
 
@@ -38,13 +38,28 @@ git config core.hooksPath .githooks
 
 启用后正常 Git commit 会阻止暂存的实验指标、影像、模型文件；但用户主动使用 `--no-verify` 或 `git add -f` 仍可绕过部分保护，因此必须遵守 `AGENTS.md` 的**绝不上传结果**规则。
 
-### 三个公平对照
-三组方法在**同一患者划分、同一预训练骨干、同一候选 Patch 集合**运行：
-- `patch_knn`：KNN 距离均值。
-- `torc_approx`：TORC-inspired 聚类生成的簇支持/离群校正 + KNN 距离。
-- `torc_consensus`：在上一组基础上增加**跨患者簇覆盖率**校正。
+### 五组固定消融（无训练，数值结果保持私有）
 
-注意：这是 **abnormal-only localization**，不是在缺少健康阴性病例时测得的病例级正常/异常诊断准确率。所有患者患癌，不能报告病例级 binary AUROC。匿名医学影像需遵守数据许可及伦理要求。
+| 实验 | 方法 | 库容量 | 验证目标 |
+|---|---|---|---|
+| E0 `patch_knn` | 原始未过滤 Patch KNN | 512 | 与之前实验基线对比 |
+| E1 `body_patch_knn` | E0 + CT HU 体部筛选（同预算） | 512 | 检验体外空气过滤 |
+| E2 `diverse_patch_knn` | 体部筛选 + 患者均衡最远点采样 | 8192 | 检验参考覆盖和多样性 |
+| E3 `torc_approx` | E2 共享 KNN 库 + 小规模 TORC-inspired 聚类修正 | 8192 / TORC 512 | 检验 TORC 独立贡献 |
+| E4 `torc_consensus` | E3 + 跨患者簇支持修正 | 8192 / TORC 512 | 检验 Consensus 增益 |
+
+E2–E4 **共用同一大型 KNN 库**。TORC 只对代表性 512 点聚类，再把簇标签通过特征近邻传播到完整参考库，避免直接构造 8192×8192 TORC 距离矩阵。E0/E1 分别在原始和体部参考上保留相同 512 Patch 预算。
+
+体部掩码采用 CT HU > -500、形态学闭运算、最大连通域和填洞，不能使用任何 GT 肿瘤区域信息。E1–E4 的体外热度会被压低，但全图指标可能因此提高；**必须以相同 ROI 对比同类方法**，同时报告全图与体部 ROI 结果及 GT 肿瘤掩码在体部 ROI 内的覆盖率。
+
+## 一键执行
+
+```bash
+bash run.sh --max-cases 8 --slice-stride 4   # 仅用于检查，非正式结果
+bash run.sh                                  # 5 组消融，全部 CT 切片
+```
+
+所有真实数值只保存在本机 `outputs/full/experiment_results.json`，绝不上传到 GitHub。第一轮旧缓存中的 CNN 特征可以继续复用（模型与特征参数不变时）；新体部参考库和 TORC 聚类仍需重新构建。运行时间及 CUDA 资源以实际设备结果为准。
 
 ### TORC 迁移状态 / 版权
 论文：J. Yang, C.-T. Lin, *Autonomous clustering by fast find of mass and distance peaks*, IEEE TPAMI (2025), DOI: [10.1109/TPAMI.2025.3535743](https://doi.org/10.1109/TPAMI.2025.3535743)。
