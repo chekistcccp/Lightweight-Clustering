@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from lightweight_clustering.local_support import local_patient_penalty, support_diagnostics
-from lightweight_clustering.v3_reporting import compare_pairs,write_multiseed_report,FACTORIAL_CONTRASTS
+from lightweight_clustering.v3_reporting import compare_pairs,factorial_effects,write_multiseed_report,FACTORIAL_CONTRASTS
 from lightweight_clustering.reporting import METRICS
 from lightweight_clustering.sampling import collect_body_references
 from lightweight_clustering.v3_experiment import parser,archive_previous_report
@@ -141,3 +141,20 @@ def test_local_archive_keeps_earlier_report(tmp_path):
     restored=list((tmp_path/"outputs"/"history").glob("**/experiment_results.json"))
     assert len(restored)==1
     assert json.loads(restored[0].read_text())["status"]=="completed"
+
+
+def test_factorial_main_effects_and_interaction_are_patient_paired():
+    rec=synth_record(42)
+    vals={
+        "body_patch_knn":0.10,
+        "body_diverse_512":0.14,
+        "body_random_8192":0.20,
+        "diverse_patch_knn":0.28,
+    }
+    for row in rec["rows"]:
+        if row["method"] in vals:
+            row["pixel_ap"]=vals[row["method"]]
+    effects=factorial_effects(rec["rows"])
+    assert effects["bank_size_main"]["pixel_ap"]["mean"]==pytest.approx(.12)
+    assert effects["diversity_main"]["pixel_ap"]["mean"]==pytest.approx(.06)
+    assert effects["size_x_diversity_interaction"]["pixel_ap"]["mean"]==pytest.approx(.04)
