@@ -39,3 +39,13 @@
 - GitHub Actions 的合成单元测试与语法检查可以证明基本逻辑，但**没有在真实MSD Colon、ModelScope权重和用户4090上跑过端到端V2**；请用户先运行 `bash run.sh --max-cases 8 --slice-stride 4`，检查完成后运行 `bash run.sh`。
 - **绝不可同步真实实验结果到GitHub**，包括 commit/PR/Issue/GitHub Actions Artifacts、logs等；只允许用户在本ChatGPT窗口上传本地JSON。
 - 后续优先检查：原缓存可复用，HU体部ROI没有漏掉大比例病灶，完整结果中E2/E3/E4确实共用同一库，Patient-level指标及分区对照是否有实际增益。不要仅因全图AUROC提升即声称算法改进。
+
+## 2026-10-15 V3 实验设计/实现交接
+
+- 新默认 `bash run.sh` → `lightweight_clustering.v3_experiment`，默认3个 `--sampling-seeds 42 123 2026`（仅重新采样参考库，不修改患者划分），8个主方法。
+- `local_support.py`：查询Patch top16近邻患者来源的距离加权Simpson集中度，训练参考距离尺度校准，修复V2“全部簇覆盖全部训练患者导致Consensus恒0”问题；记录各患者分布，非全局簇覆盖支持。
+- `v3_experiment.py`：2×2析因（body random/diverse × 512/8192），R512/D512从同种子对应的R8192/D8192大型库前512按患者轮转截取；另保留旧unmasked E0；TORC仅聚类512代表点且将簇标签传播给大库；TORC和局部评分各自单独/结合比较。
+- `v3_reporting.py`：同一JSON里保存全部种子和方法患者级数值指标、9组配对差值、析因容量/多样性主效应及交互项、每种子宏平均和跨种子稳定性统计；失败时不生成完成报告。输出 `outputs/full/experiment_results.json`（schema3），旧结果本机移入 `outputs/history/`。
+- 新 `tests/test_v3.py` 检查局部支持随近邻患者组成与距离变化、512池嵌套、配对析因差值和报告完整性；CI仅合成测试。数据和权重照旧、原CNN缓存复用，用户本机先调试 `bash run.sh --max-cases 8 --slice-stride 4 --sampling-seeds 42` 后正式 `bash run.sh`。
+- **数据保护：禁止向GitHub commit/push、Issues/PR、Actions Artifacts/logs、README或交接文件写入真实实验数值**，只能将项目代码及假数据测试同步。真实指标由用户手动传回聊天。
+- 尚未在真实 RTX4090 WSL、原始压缩MSD Task10 Colon做V3端到端GPU运行；不得宣称得到性能提升或投稿可行性证明。跨种子是参考库重采样，不构成新的患者测试集。
