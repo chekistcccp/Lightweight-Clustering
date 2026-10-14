@@ -3,13 +3,12 @@
 Usage: python -m lightweight_clustering.experiment --help
 """
 import argparse
-import csv
 import hashlib
 import json
-import os
 from pathlib import Path
+from datetime import datetime, timezone
+import subprocess
 import random
-import shutil
 import tarfile
 import time
 import zipfile
@@ -19,6 +18,7 @@ from sklearn.metrics import average_precision_score, roc_auc_score
 from sklearn.neighbors import NearestNeighbors
 
 from .torc_approx import cluster_patient_support, torque_approx
+from .reporting import export_report, utc_timestamp
 
 METHODS = ("patch_knn", "torc_approx", "torc_consensus")
 MODEL_ID = "timm/tf_mobilenetv3_small_minimal_100.in1k"
@@ -45,6 +45,8 @@ def parser():
     p.add_argument("--knn", type=int, default=5)
     p.add_argument("--num-workers", type=int, default=-1)
     p.add_argument("--force", action="store_true", help="recompute predictions/caches")
+    p.add_argument("--save-predictions", action="store_true",
+                   help="opt-in: save local score grids as NPZ (not included in report; Git ignored)")
     return p
 
 
@@ -271,6 +273,7 @@ def prepare_metric_mask(path: Path, zs, shape):
 
 
 def metric_one(score, mask):
+    """Pure pixel-level metrics; never return images, arrays or patient masks."""
     s = np.asarray(score,dtype=np.float32).ravel()
     y = np.asarray(mask,dtype=bool).ravel()
     if len(s) != len(y) or not np.all(np.isfinite(s)):
@@ -278,40 +281,58 @@ def metric_one(score, mask):
     pos = int(y.sum())
     neg = len(y) - pos
     result = dict(positive_pixels=pos,negative_pixels=neg,
-                  pixel_auroc=None,pixel_ap=None,dice_at_top5=None)
+                  pixel_auroc=None,pixel_ap=None,dice_at_top5=None,
+                  iou_at_top5=None, precision_at_top5=None,
+                  recall_at_top5=None, fpr_at_top5=None,
+                  top5_tp=None, top5_fp=None, top5_fn=None, top5_tn=None)
     if pos and neg:
         result["pixel_auroc"] = float(roc_auc_score(y,s))
         result["pixel_ap"] = float(average_precision_score(y,s))
-    if pos:
-        # PREDECLARED per-case top-5% area selection, NOT a trained or tuned threshold.
+    if len(y):
+        # Per-patient, fixed top-5% threshold; no test-label tuning.
         n_pick = max(1, int(np.ceil(0.05 * len(s))))
         idx = np.argpartition(s, -n_pick)[-n_pick:]
-        hit = int(y[idx].sum())
-        result["dice_at_top5"] = float(2*hit / (n_pick+pos))
+        tp = int(y[idx].sum())
+        fp = n_pick - tp
+        fn = pos - tp
+        tn = neg - fp
+        result.update(top5_tp=tp,top5_fp=fp,top5_fn=fn,top5_tn=tn,
+                      precision_at_top5=float(tp / n_pick),
+                      fpr_at_top5=(float(fp / neg) if neg else None))
+        if pos:
+            result.update(dice_at_top5=float(2*tp / (n_pick+pos)),
+                          iou_at_top5=float(tp / (n_pick+pos-tp)),
+                          recall_at_top5=float(tp / pos))
     return result
-
 
 def evaluate(args, out, pairs, case_data, train, test, ref, ref_owners, clustering):
     import torch
     import torch.nn.functional as F
-    from sklearn.neighbors import NearestNeighbors
+    elapsed = {}
+    t_ref = time.perf_counter()
     k = min(args.knn,len(ref))
     finder = NearestNeighbors(n_neighbors=k, metric="cosine", algorithm="brute",
                               n_jobs=args.num_workers).fit(ref)
-    # Reference intrinsic scale is train-only.
+    # Reference intrinsic scale is train-only, and self-matches are excluded.
     dist0, _ = NearestNeighbors(n_neighbors=min(k+1,len(ref)), metric="cosine",
                   algorithm="brute", n_jobs=args.num_workers).fit(ref).kneighbors(ref)
     norm = float(np.median(dist0[:,1:].mean(axis=1)))
     norm = max(norm,1e-5)
     sizes, coverage = cluster_patient_support(clustering.labels,ref_owners)
     max_size = max(float(sizes.max()),1e-6)
+    elapsed["reference_knn_setup"] = time.perf_counter() - t_ref
+    elapsed["per_patient"] = {}
+    elapsed["method_scoring_and_metric_seconds"] = {m:0.0 for m in METHODS}
     summary_rows = []
     paths = {f.name[:-7]: (f,l) for f,l in pairs}
     for name in sorted(test):
+        t_case = time.perf_counter()
         features,zs = case_data[name]
         b,h,w,dim = features.shape
         query = features.reshape(-1,dim)
+        t_knn=time.perf_counter()
         ds, neighbor_ids = finder.kneighbors(query)
+        knn_seconds=time.perf_counter()-t_knn
         base = ds.mean(axis=1).astype(np.float32) / norm
         rarity = 1 - sizes[neighbor_ids].mean(axis=1) / max_size
         consensus = 1 - coverage[neighbor_ids].mean(axis=1)
@@ -321,46 +342,50 @@ def evaluate(args, out, pairs, case_data, train, test, ref, ref_owners, clusteri
             "torc_consensus": base + 0.25*rarity + 0.25*consensus,
         }
         gt = prepare_metric_mask(paths[name][1],zs,(args.input_size,args.input_size))
+        elapsed["per_patient"][name] = {"shared_knn_seconds":knn_seconds,
+                                       "methods_seconds":{}}
         for method, flat in scores.items():
+            t_method=time.perf_counter()
             grid = flat.reshape(b,1,h,w)
             full = F.interpolate(torch.from_numpy(grid), size=(args.input_size,args.input_size),
                                  mode="bilinear",align_corners=False)[:,0].numpy()
-            pred_path = out/"predictions"/method/(name+".npz")
-            pred_path.parent.mkdir(parents=True, exist_ok=True)
-            np.savez_compressed(pred_path, score_grid=grid[:,0].astype(np.float16), zs=zs)
-            row = dict(method=method,patient=name,slices=len(zs),**metric_one(full,gt))
+            if args.save_predictions:
+                pred_path = out/"predictions"/method/(name+".npz")
+                pred_path.parent.mkdir(parents=True, exist_ok=True)
+                np.savez_compressed(pred_path, score_grid=grid[:,0].astype(np.float16), zs=zs)
+            metric = metric_one(full,gt)
+            secs=time.perf_counter()-t_method
+            elapsed["method_scoring_and_metric_seconds"][method] += secs
+            elapsed["per_patient"][name]["methods_seconds"][method] = secs
+            row = dict(method=method,patient=name,slices=len(zs),**metric)
             summary_rows.append(row)
+        elapsed["per_patient"][name]["total_seconds"] = time.perf_counter()-t_case
         print("[evaluated]", name, "slices",len(zs))
-    out_metrics = out/"metrics"
-    out_metrics.mkdir(parents=True,exist_ok=True)
-    fields = ["method","patient","slices","positive_pixels","negative_pixels",
-              "pixel_auroc","pixel_ap","dice_at_top5"]
-    with (out_metrics/"per_case.csv").open("w",newline="",encoding="utf-8") as f:
-        wr=csv.DictWriter(f,fieldnames=fields)
-        wr.writeheader()
-        wr.writerows(summary_rows)
-    overall={}
-    for method in METHODS:
-        rows=[r for r in summary_rows if r["method"]==method]
-        overall[method]={"patients":len(rows),"evaluated_slices":int(sum(r["slices"] for r in rows)),
-                          "positive_pixels":int(sum(r["positive_pixels"] for r in rows))}
-        for metric in ("pixel_auroc","pixel_ap","dice_at_top5"):
-            vals=[r[metric] for r in rows if r[metric] is not None]
-            overall[method][metric+"_macro"]=float(np.mean(vals)) if vals else None
-            overall[method][metric+"_valid_patients"]=len(vals)
-    (out_metrics/"summary.json").write_text(json.dumps(overall,indent=2),encoding="utf-8")
-    return overall
+    return summary_rows, elapsed
+
+def git_version():
+    """Report only a commit hash, never remote URLs or credentials."""
+    try:
+        p = subprocess.run(["git","rev-parse","HEAD"],capture_output=True,text=True,
+                           timeout=4,check=True)
+        return p.stdout.strip()
+    except (OSError,subprocess.SubprocessError):
+        return None
 
 
 def main():
     args = parser().parse_args()
-    if args.slice_stride < 1 or args.max_cases < 0 or args.torc_max_points < 3:
-        raise ValueError("Positive stride, nonnegative max-cases, >=3 TORC points required")
+    if (args.slice_stride < 1 or args.max_cases < 0 or args.torc_max_points < 3
+            or args.batch_size < 1 or args.knn < 1 or args.ref_per_case < 1
+            or args.input_size < 1 or args.patch_grid < 1):
+        raise ValueError("Invalid experiment size / reference / kNN arguments")
     np.random.seed(args.seed); random.seed(args.seed)
-    t0=time.perf_counter()
+    started_at = utc_timestamp()
+    t0 = time.perf_counter()
     root=Path(args.data)
     if not root.exists():
         raise FileNotFoundError("Missing data/; place original MSD archive in data/archives/")
+    # Patient-list discovery first, run type segregates debug from full outputs.
     pairs=locate_data(root)
     if args.max_cases:
         pairs=pairs[:args.max_cases]
@@ -369,42 +394,77 @@ def main():
         raise ValueError("Need at least 3 image/label pairs")
     out=Path(args.output)/("debug_"+str(args.max_cases) if args.max_cases else "full")
     out.mkdir(parents=True,exist_ok=True)
+    target=out/"experiment_results.json"
+    # Prevent stale 'completed' output from an earlier run being mistaken for the current run.
+    target.unlink(missing_ok=True)
+    timings={}
     train,test=split_cases(pairs,out/"split.json",args.seed,args.test_fraction)
     print("[cases]",len(pairs),"train",len(train),"test",len(test))
+    t=time.perf_counter()
     model,device,weights_id=load_backbone(args)
+    timings["model_initialization_seconds"]=time.perf_counter()-t
     fingerprint=hashlib.sha256(json.dumps([args.model_id,weights_id,args.input_size,
                     args.patch_grid,args.slice_stride],sort_keys=True).encode()).hexdigest()[:12]
     cases={}
+    timings["feature_extraction_per_case_seconds"]={}
+    t=time.perf_counter()
     for image,_ in pairs:
         name=image.name[:-7]
+        t_case=time.perf_counter()
         cases[name]=extract_case(image,model,device,args,out/"cache",fingerprint)
+        timings["feature_extraction_per_case_seconds"][name]=time.perf_counter()-t_case
         print("[features]",name,cases[name][0].shape)
+    timings["feature_extraction_total_seconds"]=time.perf_counter()-t
+    t=time.perf_counter()
     ref,owners=balanced_reference(cases,train,args.seed,args.ref_per_case,args.torc_max_points)
+    timings["reference_sampling_seconds"]=time.perf_counter()-t
     print("[reference]",ref.shape,"patients",len(np.unique(owners)))
+    t=time.perf_counter()
     clustering=torque_approx(ref,max_clusters=args.torc_max_clusters)
-    size,coverage=cluster_patient_support(clustering.labels, owners)
+    timings["torc_clustering_seconds"]=time.perf_counter()-t
+    sizes,coverage=cluster_patient_support(clustering.labels, owners)
+    # Numeric diagnostics only: no reference patch features or image arrays.
     stats=dict(algorithm="independent_TORC_inspired_approx_NOT_official_parity",
-               n_reference=len(ref),n_clusters=clustering.requested_clusters,
+               n_reference=len(ref),n_reference_patients=len(np.unique(owners)),
+               reference_dim=int(ref.shape[1]),
+               n_clusters=clustering.requested_clusters,
                cluster_counts=clustering.cluster_sizes.tolist(),
-               cluster_coverage_by_patch=coverage.tolist(),
+               reference_cluster_coverage_by_patch=coverage.tolist(),
+               reference_cluster_relative_size_by_patch=sizes.tolist(),
                merge_torques=clustering.merge_torques.tolist())
-    (out/"torc_diagnostics.json").write_text(json.dumps(stats,indent=2),encoding="utf-8")
-    overall=evaluate(args,out,pairs,cases,train,test,ref,owners,clustering)
+    t=time.perf_counter()
+    rows,eval_timings=evaluate(args,out,pairs,cases,train,test,ref,owners,clustering)
+    timings["evaluation_seconds"]=time.perf_counter()-t
+    timings["evaluation_breakdown"]=eval_timings
+    timings["end_to_end_total_seconds"]=time.perf_counter()-t0
     import torch
     import importlib.metadata
     ver={}
     for name in ("torch","timm","numpy","scikit-learn","nibabel","modelscope"):
         try: ver[name]=importlib.metadata.version(name)
         except importlib.metadata.PackageNotFoundError: ver[name]="unknown"
-    meta=dict(args=vars(args),weights=weights_id,backbone=MODEL_NAME,
-              versions=ver,seed=args.seed,seconds=time.perf_counter()-t0,
-              total_train=len(train),total_test=len(test),
-              peak_cuda_memory_mb=(float(torch.cuda.max_memory_allocated())/1048576
-              if device=="cuda" else None),
-              metrics=overall,warning="Prototype results; TORC Matlab parity not established")
-    (out/"run_manifest.json").write_text(json.dumps(meta,indent=2),encoding="utf-8")
-    print(json.dumps(overall,indent=2))
-    print("[done]",out.resolve())
+    metadata=dict(
+        experiment_mode=("debug_subset_DO_NOT_REPORT_AS_FINAL" if args.max_cases else "full"),
+        is_full_slice_coverage=(args.slice_stride==1 and args.max_cases==0),
+        args=vars(args),
+        weight_snapshot=dict(filename=weights_id[-1],size_bytes=weights_id[0],
+                             modified_ns=weights_id[1]),
+        backbone=MODEL_NAME, feature_cache_fingerprint=fingerprint,
+        versions=ver, git_commit=git_version(), seed=args.seed,
+        train_cases=len(train), test_cases=len(test),
+        cuda_device=(torch.cuda.get_device_name(0) if device=="cuda" else None),
+        peak_cuda_memory_allocated_mb=(float(torch.cuda.max_memory_allocated())/1048576
+                                       if device=="cuda" else None),
+        results_were_uploaded_to_github=False,
+        methodological_warning="TORC-inspired approximation; NOT a validated MATLAB port",
+    )
+    split_info=dict(seed=args.seed,train=sorted(train),test=sorted(test))
+    filepath=export_report(target,methods=METHODS, rows=rows, metadata=metadata,
+                           diagnostics=stats,timings=timings,splits=split_info,
+                           started_at=started_at)
+    print("[complete] all numeric metrics and metadata (no images):",filepath.resolve())
+    print("[privacy] report is local only, ignored by Git; attach this JSON directly to ChatGPT.")
+    print("[summary] total patients:",len(test),"methods:",len(METHODS))
 
 
 if __name__=="__main__":
