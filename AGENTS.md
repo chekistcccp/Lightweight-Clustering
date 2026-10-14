@@ -5,13 +5,13 @@
 - 主数据：MSD Task10_Colon（用户把原始压缩包放在 `data/archives/` 或 `data/`）；自动解包/索引/预处理。保留压缩包，禁止任何患者影像上传仓库。
 - 患者级固定随机拆分 seed 42；不存在相同患者在训练建库及测试评价两侧。不能用 `labelsTr` 构建参考库、切片选择、超参数调优或特征过滤，**仅在评价时访问掩码**。
 - 冻结的轻量 MobileNetV3；ModelScope 官方模型卡已核实 `timm/tf_mobilenetv3_small_minimal_100.in1k`。模型存 `model/`，数据 `data/`，中间缓存 `outputs/cache/`，指标 `outputs/metrics/`，均不提交 Git。
-- 三组唯一主对照：`patch_knn`、`torc_approx`、`torc_consensus`；必须共享相同的特征、划分、参考库和评分后处理，不得各自偷偷调参。
+- 五组固定消融（原基线、体部过滤、扩大且多样化 KNN、TORC-inspired、TORC+Consensus）：`patch_knn`、`torc_approx`、`torc_consensus`；必须共享相同的特征、划分、参考库和评分后处理，不得各自偷偷调参。
 - 官方 MATLAB 的 `TorqueClustering.p`、其他 .p 和 `TORC.mexw64` 不是可直接逐行迁移的开源 .m；本项目实现属于**近似独立实现，未经官方 parity 验证**。写论文不得用“严格等价”或“官方 TORC”描述。
 - 本算法可能让常见肿瘤形成簇、让罕见健康解剖成为离群点；研究报告必须包括失败病例、簇患者覆盖率和异常富集证据，不能只提供好看的热力图。
 
 ## 执行习惯
 - 用户**手动创建/激活 Conda** 环境、手动获取数据压缩包；脚本不 `conda create`、不 `pip install`、不升级 torch、也不运行 Slurm。
-- `bash run.sh` 是唯一正式全流程入口：自检→安全解压→索引→冻结推理缓存→TORC 限规模聚类→三方法→评估→结果归档；缓存与断点复跑必须有效；依赖不完整/无数据/无法下载权重时**明确失败而非输出虚构数字**。
+- `bash run.sh` 是唯一正式全流程入口：自检→安全解压→索引→冻结推理缓存→体部筛选/患者均衡采样→小 TORC 代表集→五方法→全图及体部 ROI 评价→结果归档；缓存与断点复跑必须有效；依赖不完整/无数据/无法下载权重时**明确失败而非输出虚构数字**。
 - 默认面向单卡 GPU（WSL）、适度显存、混合精度可选；不要引入 Qwen、扩散模型、额外骨干、伪标签网络、其他数据集或训练步骤，除非用户明确变更。
 - 固定患者 seed、预处理窗、slice stride、模型 revision、torch/timm/numpy 版本及脚本 git SHA；每次结果带配置快照。比对 Pixel AUROC、Pixel AP、AUPRO（若实现）、Dice@top5%（辅助，不作为监督阈值）、运行时间与峰值显存。
 - 代码应容错单切片/极小患者数/无正例像素，空预测不填零；异常只在真实数据运行后定量确认。
@@ -30,3 +30,9 @@
 - 强制遵守 `.gitignore`；默认启用本地保护建议：`chmod +x .githooks/pre-commit && git config core.hooksPath .githooks`。代码会拒绝把结果写到 Git 可跟踪位置（结果仍不具备加密保障）。
 - 结果仅在全部病例和全部方法计算成功后原子写入；失败时不产生新的 completed JSON。不要把 debug subset 当正式统计结果，不能伪造缺失指标。
 - 每次修改报告结构要增加或修改 `tests/test_reporting.py` 与结果拦截测试，确保不含图像数组、没有遗漏患者/方法、不能外泄到 GitHub。
+
+## V2 特征选择与评价（禁止使用肿瘤真值决策）
+- E0 `patch_knn`：原512个未过滤参考 Patch；E1 `body_patch_knn`：同512预算、CT体部过滤；E2 `diverse_patch_knn`：患者均衡的8192多样化 Patch；E3 `torc_approx` 和 E4 `torc_consensus`：与 E2 共用完整 KNN 库，只聚类512个训练代表 Patch，再将簇标签传播。
+- E0–E4 固定相同患者拆分、冻结 MobileNetV3、窗位和 kNN K=5；不得根据测试掩码选择池化层、面积阈值或系数。可使用 body ROI，但它完全由 CT HU 确定，不能使用 GT。
+- 全图和体部内的 Pixel AUROC/AP 分开报告；面积预算 Top0.1%、0.5%、1%、5% 固定，并输出 Dice/IoU/Precision/Recall/FPR 和 TP/FP/FN/TN。21点数值 PR 曲线不生成图。须记录被体部掩码排除的 GT 肿瘤像素数。
+- 本地 `outputs/full/experiment_results.json` 是唯一需要回传的汇总报告，仍**严禁任何真实指标或结果通过仓库/Issue/PR/Actions/Release 同步**。
