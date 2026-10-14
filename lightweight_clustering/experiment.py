@@ -343,7 +343,6 @@ def evaluate(args, out, pairs, case_data, train, test, ref, ref_owners, clusteri
 
 
 def main():
-    import torch
     args = parser().parse_args()
     if args.slice_stride < 1 or args.max_cases < 0 or args.torc_max_points < 3:
         raise ValueError("Positive stride, nonnegative max-cases, >=3 TORC points required")
@@ -381,6 +380,7 @@ def main():
                merge_torques=clustering.merge_torques.tolist())
     (out/"torc_diagnostics.json").write_text(json.dumps(stats,indent=2),encoding="utf-8")
     overall=evaluate(args,out,pairs,cases,train,test,ref,owners,clustering)
+    import torch
     import importlib.metadata
     ver={}
     for name in ("torch","timm","numpy","scikit-learn","nibabel","modelscope"):
