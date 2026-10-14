@@ -18,7 +18,7 @@ from sklearn.metrics import average_precision_score, roc_auc_score
 from sklearn.neighbors import NearestNeighbors
 
 from .torc_approx import cluster_patient_support, torque_approx
-from .reporting import export_report, utc_timestamp
+from .reporting import ensure_not_git_trackable, export_report, utc_timestamp
 
 METHODS = ("patch_knn", "torc_approx", "torc_consensus")
 MODEL_ID = "timm/tf_mobilenetv3_small_minimal_100.in1k"
@@ -395,6 +395,9 @@ def main():
     out=Path(args.output)/("debug_"+str(args.max_cases) if args.max_cases else "full")
     out.mkdir(parents=True,exist_ok=True)
     target=out/"experiment_results.json"
+    # Ensure the result path is Git-ignored (or entirely outside the repo).
+    # Refuse an unsafe destination before deleting or writing any prior report.
+    ensure_not_git_trackable(target)
     # Prevent stale 'completed' output from an earlier run being mistaken for the current run.
     target.unlink(missing_ok=True)
     timings={}
