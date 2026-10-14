@@ -80,7 +80,7 @@ def locate_data(root: Path):
                 continue
             labels = folder.parent / "labelsTr"
             if labels.is_dir():
-                images = {f.name: f for f in folder.glob("*.nii.gz")}
+                images = {f.name: f for f in folder.glob("*.nii.gz") if not f.name.startswith("._")}
                 pairs = [(f, labels / name) for name, f in images.items()
                          if (labels / name).is_file()]
                 if len(pairs) >= 3:
