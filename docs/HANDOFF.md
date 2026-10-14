@@ -26,3 +26,16 @@
 - 新增 `reporting.py`、`tests/test_reporting.py`、`scripts/check_staged.py`、`.githooks/pre-commit`；Git 忽略策略扩展。Git hooks 启用前需用户在 WSL 执行 `chmod +x .githooks/pre-commit && git config core.hooksPath .githooks`。
 - **不得将任何真实实验结果提交 GitHub、写进 Issue/PR/日志/文档，也不能上传至 Actions Artifacts；只告知用户本机结果 JSON 路径，等用户手动回传本 ChatGPT 网页。**
 - 尚未在真实 MSD 数据集、ModelScope GPU 权重与 Windows WSL 环境进行完整运行；GitHub CI 仅验证代码语法及合成单元测试。
+
+
+## 2026-10-14 V2 多组消融代码更新（真实运行待用户执行）
+
+- 默认 `run.sh` 已切换为 `python -m lightweight_clustering.v2_experiment`；旧 `experiment.py` 留作 legacy 基线函数和回归测试，禁止将旧脚本的3组实验误称当前5组。
+- V2 提供五组：`patch_knn`、`body_patch_knn`、`diverse_patch_knn`、`torc_approx`、`torc_consensus`。E0/1 同512参考预算；E2/3/4共用更大患者均衡、多样性采样的8192特征库；TORC只在训练库512代表点聚类后无监督传播标签。
+- 新增 `lightweight_clustering/body.py`：CT HU 阈值、二值闭运算、最大连通域、填洞、patch占比过滤；GT 标签只在最终评价读取。
+- 新增 `lightweight_clustering/sampling.py`：余弦最远点优先、患者均衡分配、代表集和簇标签传播。大型KNN用CUDA/CPU chunked torch matmul而非构造巨大TORC全距阵。
+- 新增 `lightweight_clustering/metrics_v2.py`：全图+体部ROI的Pixel AUROC/AP及Top0.1%、0.5%、1%、5%各预算Dice/IoU/Precision/Recall/FPR、TP/FP/FN/TN、数值PR曲线。区域指标在每位患者的选定ROI内计算，别跨ROI混比。
+- `reporting.py` 报告 schema 增至2.0.0，仍只输出本机一份 `outputs/full/experiment_results.json`（包含全部数值诊断，不含图像），失败不生成新的完成报告。重复运行前旧结果自动移到本机 `outputs/history/` 以防丢失。
+- GitHub Actions 的合成单元测试与语法检查可以证明基本逻辑，但**没有在真实MSD Colon、ModelScope权重和用户4090上跑过端到端V2**；请用户先运行 `bash run.sh --max-cases 8 --slice-stride 4`，检查完成后运行 `bash run.sh`。
+- **绝不可同步真实实验结果到GitHub**，包括 commit/PR/Issue/GitHub Actions Artifacts、logs等；只允许用户在本ChatGPT窗口上传本地JSON。
+- 后续优先检查：原缓存可复用，HU体部ROI没有漏掉大比例病灶，完整结果中E2/E3/E4确实共用同一库，Patient-level指标及分区对照是否有实际增益。不要仅因全图AUROC提升即声称算法改进。
