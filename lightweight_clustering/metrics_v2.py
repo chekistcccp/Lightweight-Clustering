@@ -17,6 +17,7 @@ def numeric_fields():
     names = list(SCALAR_FIELDS)
     names.extend(f"{metric}_at_{suffix}" for suffix in BUDGET_NAMES for metric in BUDGET_FIELDS)
     names.extend("body_" + key for key in list(names))
+    names.extend(["body_mask_area_fraction","tumor_coverage_by_body"])
     return tuple(names)
 
 
@@ -42,7 +43,8 @@ def rank_metrics(scores, truth, *, curve_points=21):
         recalls = tps.astype(np.float64) / pos
         delta_pos = np.diff(np.r_[0, tps])
         out["pixel_ap"] = float(np.sum(precision * delta_pos / pos))
-        out["pixel_auroc"] = float(np.trapezoid(np.r_[0, tps/pos], np.r_[0, fps/neg]))
+        out["pixel_auroc"] = float(np.sum(np.diff(np.r_[0, fps/neg]) *
+                                             (np.r_[0, tps/pos][1:] + np.r_[0, tps/pos][:-1]) / 2))
         for target in np.linspace(0., 1., num=curve_points):
             if target == 0.:
                 curve.append(dict(target_recall=0., recall=0., precision=1.))
