@@ -52,6 +52,42 @@ def compare_pairs(rows, variants=FACTORIAL_CONTRASTS):
     return result
 
 
+
+def factorial_effects(rows):
+    """Per-patient 2x2 contrasts: size, diversity and difference-in-differences.
+
+    Values use the same 4 methods at the same bank-sampling seed.
+    This is an exploratory balanced contrast, NOT an independent validation.
+    """
+    by={(r["method"],r["patient"]):r for r in rows}
+    patients=sorted({p for m,p in by if m=="body_patch_knn"})
+    patterns=dict(
+        bank_size_main=("body_random_8192","body_patch_knn",
+                        "diverse_patch_knn","body_diverse_512"),
+        diversity_main=("body_diverse_512","body_patch_knn",
+                        "diverse_patch_knn","body_random_8192"),
+        size_x_diversity_interaction=("diverse_patch_knn","body_random_8192",
+                                      "body_diverse_512","body_patch_knn"),
+    )
+    output={}
+    for label,methods4 in patterns.items():
+        output[label]={}
+        for metric in METRICS:
+            values=[]
+            for patient in patients:
+                q=[by[(method,patient)].get(metric) for method in methods4]
+                if any(v is None for v in q):
+                    continue
+                if label=="size_x_diversity_interaction":
+                    delta=(float(q[0])-float(q[1]))-(float(q[2])-float(q[3]))
+                else:
+                    delta=0.5*((float(q[0])-float(q[1]))+
+                               (float(q[2])-float(q[3])))
+                values.append(delta)
+            output[label][metric]=describe(values)
+    return output
+
+
 def write_multiseed_report(target, *, methods, records, split, metadata,
                            common_timings, started_at):
     """Validate every seed and write one JSON atomically (no partial report)."""
@@ -75,9 +111,11 @@ def write_multiseed_report(target, *, methods, records, split, metadata,
             raise ValueError("Incomplete or duplicated patient/method at seed "+str(seed))
         summary=aggregate(methods,rows)
         deltas=compare_pairs(rows)
+        factorial=factorial_effects(rows)
         prepared.append(dict(sampling_seed=seed,
                              metrics=summary,
                              factorial_and_method_contrasts=deltas,
+                             factorial_main_and_interaction_effects=factorial,
                              clustering_diagnostics=record["diagnostics"],
                              timings_seconds=record["timings"],
                              per_case_metrics=sorted(rows,key=lambda r:(r["patient"],r["method"]))))
@@ -95,6 +133,13 @@ def write_multiseed_report(target, *, methods, records, split, metadata,
             vals=[block["factorial_and_method_contrasts"][contrast][metric]["mean"]
                   for block in prepared]
             mean_deltas[contrast][metric]=describe([v for v in vals if v is not None])
+    summary_factorial={}
+    for effect in prepared[0]["factorial_main_and_interaction_effects"]:
+        summary_factorial[effect]={}
+        for metric in METRICS:
+            means=[r["factorial_main_and_interaction_effects"][effect][metric]["mean"]
+                   for r in prepared]
+            summary_factorial[effect][metric]=describe([v for v in means if v is not None])
     report=dict(
         report_schema_version="3.0.0",
         status="completed",
@@ -112,6 +157,7 @@ def write_multiseed_report(target, *, methods, records, split, metadata,
         overall_timings_seconds=common_timings,
         metrics_across_sampling_seeds=average,
         paired_contrasts_across_sampling_seeds=mean_deltas,
+        factorial_effects_across_sampling_seeds=summary_factorial,
         per_sampling_seed=prepared,
         definitions=dict(
             metrics_across_sampling_seeds="Describes variation of each seed's PATIENT MACRO metric; n = number of seeds, not independent patients",
@@ -121,6 +167,7 @@ def write_multiseed_report(target, *, methods, records, split, metadata,
             top_area="top0p1/top0p5/top1/top5: predefined 0.1%/0.5%/1%/5% of evaluated ROI",
             local_support="Query-local kNN patient-concentration penalty; not global cluster-patient coverage",
             ablation="2x2 factorial random vs diverse, reference size 512 vs 8192; comparisons are descriptive, test data already seen in prior exploratory rounds",
+            factorial_effects="bank_size_main averages 8192-512 over random/diverse; diversity_main averages diverse-random over sizes; interaction=(diverse8192-random8192)-(diverse512-random512)",
             random_seeds="Fixed patient split, multiple random bank subsamples; cannot claim independent external validation",
         ),
         limitations=[
