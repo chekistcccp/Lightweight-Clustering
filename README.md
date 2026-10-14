@@ -1,76 +1,104 @@
-# Lightweight-Clustering：无健康对照 CT 异常定位
+# Lightweight-Clustering：无健康对照结肠癌 CT 异常定位（V3）
 
-> **状态：研究原型 / 尚未在 MSD Colon 上验证。** 本项目的 `torc_approx` 是依论文思路独立编写的 **TORC-inspired 近似算法**，不是 2025 TPAMI 官方 MATLAB P-code 的严格翻译，更不代表通过 MATLAB 数值等价验证。不能以“官方 TORC Python 复现”对外宣称。
+**运行状态：已通过代码语法与合成数据单元测试，尚未在用户真实 MSD CT 上运行 V3。**  
+**算法声明：TORC-inspired 独立近似实现，并非官方 TPAMI MATLAB P-code 的等价迁移。**
 
-## 目标
-在**只有结直肠癌患者 CT、没有独立健康患者 CT**的条件下，使用冻结轻量视觉骨干 + 无训练聚类/近邻方法生成病灶异常热图。对照五组固定消融：`patch_knn`、`torc_approx`、`torc_consensus`。**不使用肿瘤标注构造特征库、选层、筛选切片、选择参数。**
+## 研究目标
 
-### 上手（Windows WSL / 单张 GPU）
-1. 用户自行创建并激活 Conda 环境。参考：`conda create -n lwcluster python=3.11 -y && conda activate lwcluster`。安装依赖：`pip install -r requirements.txt`；根据自身 CUDA 环境单独安装兼容 PyTorch，**run.sh 不修改环境**。
-2. 手动下载 **Medical Segmentation Decathlon Task10_Colon 原始压缩包**，直接放入 `data/archives/`（也支持 `data/` 根目录，tar / tar.gz / zip；不解压）。项目会自动、安全地解压，并定位 `imagesTr/labelsTr`。不要上传患者原始数据。
-3. 权重由代码通过 ModelScope 自动下载到 `model/`：已核实的模型仓库 `timm/tf_mobilenetv3_small_minimal_100.in1k`。网络可用时第一次运行自动获取；如果已放好原始 ModelScope 权重目录则跳过下载。
-4. `bash run.sh` 完成检查、解压、患者级划分、冻结特征缓存、共同参考集建库、五组消融及**唯一指标汇总文件** `outputs/full/experiment_results.json`。再次运行复用特征缓存。可用 `bash run.sh --max-cases 8 --slice-stride 4` 快速诊断（调试结果：`outputs/debug_8/experiment_results.json`，**不能作为正式论文结果**）。
-5. `python -m pytest -q` 验证算法级测试；`python scripts/matlab_parity.py --help` 说明 MATLAB 一致性验证流程。
+在**只拥有结直肠癌患者 CT、不依赖额外健康患者 CT**的条件下，复用冻结 MobileNetV3-Small（来自 ModelScope）的 CT Patch 特征，评估无训练异常定位：
 
-**所有运行参数：** `bash run.sh --help`。默认 `--slice-stride 1` 对全部切片评估；快速初验请显式传入 `--max-cases 8 --slice-stride 4`；指标明确报告评估覆盖的切片数和患癌阳性像素数。
+1. 2×2 析因消融：**参考库规模 512 / 8192** × **随机 / 余弦最远点多样性采样**；
+2. TORC-inspired 聚类稀有度是否有独立增益；
+3. **查询 Patch 局部跨患者近邻支持度**是否改善排序（不再使用先前全部簇均覆盖101名患者的全局支持定义）；
+4. 三个预先固定的**参考库采样种子**的稳定性（患者划分始终不变，因此不等于外部验证或独立测试）。
 
-### 实验结果：只回传一个 JSON 文件（不会上传 GitHub）
+训练参考只从训练患者的 CT 提取，严禁从肿瘤分割掩码选择特征或调参；只有评估阶段读取 `labelsTr`。
 
-正式运行结束会打印绝对路径：
+## 一、用户手动准备
+
+- Windows WSL、单卡 CUDA GPU（已有 RTX 4090 可用），自建并激活 Conda 环境。脚本**不创建环境、不自动安装或升级 PyTorch**。
+- 自行安装与 CUDA 环境匹配的 `torch` 和 `torchvision`，其余依赖 `pip install -r requirements.txt`。
+- 将 MSD Task10 Colon 的**原始压缩包**放进 `data/archives/`，不必手工解压；项目自动安全解压和定位 `imagesTr/labelsTr`。来源见 [数据说明](docs/DATA_GUIDE.md)。
+- 代码首次使用 ModelScope 自动下载 `timm/tf_mobilenetv3_small_minimal_100.in1k` 权重至 `model/`；也可自行准备原始模型仓库并传 `--offline`。
+- 先前的 `outputs/full/cache/` 特征可以继续沿用（冻结骨干、特征层和输入尺寸不变时）；**训练 CT 的 HU Body Mask 在每次调用中只计算一次**，三个采样种子共享。
+
+## 二、执行命令
+
+先完成一个采样种子的快速真实数据检查：
+
+```bash
+git pull origin main
+bash run.sh --max-cases 8 --slice-stride 4 --sampling-seeds 42
+```
+
+确认报告已生成，正式运行（默认 **seed 42/123/2026**、完整 126 个已标注 CT 中的固定患者级 80/20 划分、全部切片）：
+
+```bash
+bash run.sh
+```
+
+如需先完成仅一个采样种子的全数据实验：
+
+```bash
+bash run.sh --sampling-seeds 42
+```
+
+查看完整参数：`bash run.sh --help`。所有人工建立的 Conda 环境/数据文件不会被删除。
+
+## 三、八组固定对照
+
+| 名称 | 参考库 | 设计/要验证的因素 |
+| --- | --- | --- |
+| `patch_knn` | 原未过滤512 | 旧版原始基线、全图评分 |
+| `body_patch_knn` | CT体部、随机512 | 体部过滤；本版512从同采样种子的8192池前缀提取，与V2旧512抽样可能不同 |
+| `body_diverse_512` | CT体部、多样性512 | 固定512，孤立验证“多样性” |
+| `body_random_8192` | CT体部、随机8192 | 固定随机策略，孤立验证“容量” |
+| `diverse_patch_knn` | CT体部、多样性8192 | 2×2 析因的最后一格，也是新基线 |
+| `torc_approx` | 同上8192＋512 TORC代表点 | 无监督簇稀有度增益 |
+| `local_consensus_knn` | 同上8192＋16局部近邻 | 无TORC、仅局部患者来源集中度修正 |
+| `torc_consensus` | 同上8192＋TORC＋局部支持度 | 两项修正是否互补 |
+
+**公平对比规则：** 512 库从同一采样种子对应的 8192 库中按患者轮转选出的**前512个 Patch**，消除更换候选池的额外干扰；E3/E4 同大型库。所有版本使用相同冻结特征和 kNN K=5，局部支持用16个近邻，预设 TORC/支持度修正系数均为0.25；不以测试肿瘤掩码调参。
+
+体部掩码由 CT HU > -500、最大连通域等常规形态学操作获得。V3 在**全图、体部 ROI**分别计算指标，并记录被体部掩码排除的肿瘤像素数；不能仅因删除空气区域导致的全图性能提升就称为肿瘤定位改进。
+
+TORC 聚类仅在最大512个训练代表 Patch 上运行，再将簇标签无监督传播给8192参考 Patch，**不是对8192点进行完整 TORC 聚类**。算法详情见 [研究协议](docs/PROTOCOL.md)。
+
+## 四、最终结果：仅一个本地文件
 
 ```text
 outputs/full/experiment_results.json
 ```
 
-**将这一个 JSON 文件手动作为附件上传回本 ChatGPT 网页即可。** 不需要压缩整个 outputs 目录，不需要上传 CT、NIfTI、掩码或热力图。报告包含：完整运行配置与版本、训练/测试患者划分、五种方法的**全部已实现数值指标**、每位患者的指标和 TP/FP/FN/TN、相对 Patch KNN 的配对差值、簇数/簇大小/跨患者覆盖率/merge torques、每阶段与每方法的用时及峰值 CUDA 显存、完整性和科研限制说明。
+- JSON schema 3.0.0，包含全部8组×每个采样种子的患者级 Pixel AUROC/AP、全图/体部 Top0.1%、Top0.5%、Top1%、Top5% 的 Dice/IoU/Precision/Recall/FPR、混淆数、21个**数值**PR采样点；
+- 各采样种子的患者宏平均、同患者配对差值，以及跨采样种子的均值和离散程度；
+- 每个种子的聚类数量/大小、参考库样本与患者覆盖、局部支持度分布、时间、配置及软件版本；
+- **绝不包含 CT 图像、分割掩码、异常热力图、特征矩阵或像素预测数组。** 没有健康对照病例，故不得报告患者级健康/癌症AUROC；尚未实现AUPRO，不能虚构该指标。
+- `--max-cases 8` 调试结果在 `outputs/debug_8/experiment_results.json`，不当作正式科研指标；
+- 重新运行前会将已有旧结果移动至本机 `outputs/history/`，避免丢失。
+- 默认不保存预测 NPZ；用户主动添加 `--save-predictions` 才会把预测网格**留在本机 Git 忽略目录**。
 
-当前已实现数值指标：**全图 + HU 体部 ROI** 的 Pixel AUROC、Pixel AP；预先固定 Top0.1%、Top0.5%、Top1%、Top5% 的 Dice、IoU、Precision、Recall、FPR 和 TP/FP/FN/TN；每病例体部占比、体部 GT 肿瘤覆盖、21 个数值 PR 点。提供病例 macro mean/std/median/min/max/n、配对 delta、分簇诊断、用时及峰值显存。没有实现的 AUPRO 和患者级正常/癌症 AUROC 不会被伪造。
+**请只把本机 `experiment_results.json` 手动上传回当前 ChatGPT 对话。严禁任何真实数值或病例结果同步到 GitHub。** `data/`、`model/`、`outputs/` 全部已被 Git 忽略；脚本自身不执行 git add/commit/push，CI 只跑无真实病患数据的合成测试。
 
-已有正式 JSON 在重新运行前会自动移动到本机 `outputs/history/` 内的时间戳文件夹，避免新运行失败时丢失上一份结果。历史文件同样受到 Git 忽略保护，只在用户本机保留。\n\n实验过程中的本地文件包括 `outputs/full/split.json` 与 `outputs/full/cache/`（运算缓存，不属于需要回传的实验指标）。默认**不保存预测图像/热力图**。只有显式加入 `--save-predictions` 才会额外存本地 `outputs/full/predictions/*.npz`，它们不会进入 JSON，且同样不能提交 Git。旧版本生成的 `metrics/*.csv`、`summary.json` 等文件不会被新版本重新生成，如本地还存在可自行删除。
-
-- `outputs/`、`data/`、`model/` 已被 Git 忽略，附加全路径忽略规则防止将 JSON 拷贝到仓库其他位置后误提交；**程序不调用 git add、commit、push，也不会创建 Release/Actions artifact。**
-- 可选的提交前保护（在 WSL 克隆的仓库内手动执行一次）：
+可额外启用本地 Git 提交前保护：
 
 ```bash
 chmod +x .githooks/pre-commit
 git config core.hooksPath .githooks
 ```
 
-启用后正常 Git commit 会阻止暂存的实验指标、影像、模型文件；但用户主动使用 `--no-verify` 或 `git add -f` 仍可绕过部分保护，因此必须遵守 `AGENTS.md` 的**绝不上传结果**规则。
+## 五、研究局限
 
-### 五组固定消融（无训练，数值结果保持私有）
+- 前两轮研究已经查看过当前固定测试集，第三轮方法属于**探索性改进**；跨采样种子波动不能替代新患者的独立外部测试。
+- 结直肠肿瘤极稀疏，较高 Pixel AUROC 不代表病灶定位已达临床可用水平；必须同时检查体部 Pixel AP、Top0.1–1% Dice、患者级稳定性及体部遗漏病灶。
+- 跨患者支持集中度只是无监督异常启发式，正常但少见的结构可能被误检为病灶。
+- TORC 原文：Yang & Lin, *Autonomous clustering by fast find of mass and distance peaks*, IEEE TPAMI 2025, DOI [10.1109/TPAMI.2025.3535743](https://doi.org/10.1109/TPAMI.2025.3535743)；[官方 MATLAB](https://github.com/JieYangBruce/TorqueClustering)核心 P-code 不可直接逐行翻译，项目目前只是独立近似，不声明 MATLAB 等价。
+- 更详尽操作与 Codex 规则：[AGENTS.md](AGENTS.md) · [docs/HANDOFF.md](docs/HANDOFF.md) · [docs/PROTOCOL.md](docs/PROTOCOL.md)。
 
-| 实验 | 方法 | 库容量 | 验证目标 |
-|---|---|---|---|
-| E0 `patch_knn` | 原始未过滤 Patch KNN | 512 | 与之前实验基线对比 |
-| E1 `body_patch_knn` | E0 + CT HU 体部筛选（同预算） | 512 | 检验体外空气过滤 |
-| E2 `diverse_patch_knn` | 体部筛选 + 患者均衡最远点采样 | 8192 | 检验参考覆盖和多样性 |
-| E3 `torc_approx` | E2 共享 KNN 库 + 小规模 TORC-inspired 聚类修正 | 8192 / TORC 512 | 检验 TORC 独立贡献 |
-| E4 `torc_consensus` | E3 + 跨患者簇支持修正 | 8192 / TORC 512 | 检验 Consensus 增益 |
-
-E2–E4 **共用同一大型 KNN 库**。TORC 只对代表性 512 点聚类，再把簇标签通过特征近邻传播到完整参考库，避免直接构造 8192×8192 TORC 距离矩阵。E0/E1 分别在原始和体部参考上保留相同 512 Patch 预算。
-
-体部掩码采用 CT HU > -500、形态学闭运算、最大连通域和填洞，不能使用任何 GT 肿瘤区域信息。E1–E4 的体外热度会被压低，但全图指标可能因此提高；**必须以相同 ROI 对比同类方法**，同时报告全图与体部 ROI 结果及 GT 肿瘤掩码在体部 ROI 内的覆盖率。
-
-## 一键执行
+## 六、代码测试
 
 ```bash
-bash run.sh --max-cases 8 --slice-stride 4   # 仅用于检查，非正式结果
-bash run.sh                                  # 5 组消融，全部 CT 切片
+python -m pytest -q
 ```
 
-所有真实数值只保存在本机 `outputs/full/experiment_results.json`，绝不上传到 GitHub。第一轮旧缓存中的 CNN 特征可以继续复用（模型与特征参数不变时）；新体部参考库和 TORC 聚类仍需重新构建。运行时间及 CUDA 资源以实际设备结果为准。
-
-### TORC 迁移状态 / 版权
-论文：J. Yang, C.-T. Lin, *Autonomous clustering by fast find of mass and distance peaks*, IEEE TPAMI (2025), DOI: [10.1109/TPAMI.2025.3535743](https://doi.org/10.1109/TPAMI.2025.3535743)。
-- 官方：https://github.com/JieYangBruce/TorqueClustering （核心 `.p` 不可读取，Windows MEX 不能在 WSL 原生直接调用）。
-- 非官方参考：https://github.com/Cognet-74/TorqueClusteringPy ；不能假定与官方一致。
-- 本仓库**没有复制、解密或打包官方 P-code/MEX**；`torc_approx.py` 根据公开思想独立实现，以不同名称防止混淆。
-- 官方代码采用 CC BY-NC-SA 4.0 且明确限制商业使用；使用官方实现或衍生代码时需满足其许可、保留署名并取得商业许可。本文提供的研究代码亦仅供非商业学术验证。
-- `scripts/matlab_parity.py` 读取在本地 MATLAB 由**用户自行运行官方源码**得到的 .mat 输出，比对一致性（允许标签置换）；验证前不声称等价。
-
-### 论文基本约束
-- 所有超参数预先固定，不可用 test mask 调参；没有验证集时只报告**探索性**结果。
-- 输出热图不等于经过组织病理验证的病灶定位；罕见正常结构可能被判为异常。
-- 内存：官方基于完整 N×N 距离阵；本项目通过 **按患者抽样的上限 `--torc-max-points`** 控制聚类规模。计算、显存、内存和耗时均应如实报告。
-- 需要至少多次患者级随机划分 / 外部数据测试与稳定性实验才能支持较高层次投稿，**不能仅凭运行成功保证发表**。
+这只验证合成数据与算法约束。真实 WSL/RTX4090、ModelScope 权重和完整 MSD 流水线必须由用户在本地运行检查。
