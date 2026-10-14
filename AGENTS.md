@@ -5,7 +5,7 @@
 - 主数据：MSD Task10_Colon（用户把原始压缩包放在 `data/archives/` 或 `data/`）；自动解包/索引/预处理。保留压缩包，禁止任何患者影像上传仓库。
 - 患者级固定随机拆分 seed 42；不存在相同患者在训练建库及测试评价两侧。不能用 `labelsTr` 构建参考库、切片选择、超参数调优或特征过滤，**仅在评价时访问掩码**。
 - 冻结的轻量 MobileNetV3；ModelScope 官方模型卡已核实 `timm/tf_mobilenetv3_small_minimal_100.in1k`。模型存 `model/`，数据 `data/`，中间缓存 `outputs/cache/`，指标 `outputs/metrics/`，均不提交 Git。
-- 五组固定消融（原基线、体部过滤、扩大且多样化 KNN、TORC-inspired、TORC+Consensus）：`patch_knn`、`torc_approx`、`torc_consensus`；必须共享相同的特征、划分、参考库和评分后处理，不得各自偷偷调参。
+- 五组固定消融（原基线、体部过滤、扩大且多样化 KNN、TORC-inspired、TORC+Consensus）：`patch_knn`、`torc_approx`、`torc_consensus`；各方法必须共享患者拆分、冻结特征和评价口径；E2/E3/E4 共用大型参考库，E0/E1 使用各自明确规定的 512 点采样作为消融变量，不得逐方法按测试标签调参。
 - 官方 MATLAB 的 `TorqueClustering.p`、其他 .p 和 `TORC.mexw64` 不是可直接逐行迁移的开源 .m；本项目实现属于**近似独立实现，未经官方 parity 验证**。写论文不得用“严格等价”或“官方 TORC”描述。
 - 本算法可能让常见肿瘤形成簇、让罕见健康解剖成为离群点；研究报告必须包括失败病例、簇患者覆盖率和异常富集证据，不能只提供好看的热力图。
 
