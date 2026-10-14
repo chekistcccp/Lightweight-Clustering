@@ -16,3 +16,17 @@ __pycache__/
 .env
 .venv/
 *.log
+
+# Research outputs must remain local even if copied outside outputs/.
+# Git ignore is not a security boundary: 'git add -f' can override it.
+**/experiment_results.json
+**/experiment_results_*.json
+**/research_results*.json
+**/per_case.csv
+**/torc_diagnostics.json
+**/run_manifest.json
+**/summary.json
+**/split.json
+**/predictions/
+**/cache/
+**/*.nii.gz
