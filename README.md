@@ -9,10 +9,10 @@
 1. 用户自行创建并激活 Conda 环境。参考：`conda create -n lwcluster python=3.11 -y && conda activate lwcluster`。安装依赖：`pip install -r requirements.txt`；根据自身 CUDA 环境单独安装兼容 PyTorch，**run.sh 不修改环境**。
 2. 手动下载 **Medical Segmentation Decathlon Task10_Colon 原始压缩包**，直接放入 `data/archives/`（也支持 `data/` 根目录，tar / tar.gz / zip；不解压）。项目会自动、安全地解压，并定位 `imagesTr/labelsTr`。不要上传患者原始数据。
 3. 权重由代码通过 ModelScope 自动下载到 `model/`：已核实的模型仓库 `timm/tf_mobilenetv3_small_minimal_100.in1k`。网络可用时第一次运行自动获取；如果已放好原始 ModelScope 权重目录则跳过下载。
-4. `bash run.sh` 完成检查、解压、患者级划分、冻结特征缓存、共同参考集建库、三组实验及**唯一指标汇总文件** `outputs/full/experiment_results.json`。再次运行复用特征缓存。可用 `bash run.sh --max-cases 8` 快速诊断（调试结果：`outputs/debug_8/experiment_results.json`，**不能作为正式论文结果**）。
+4. `bash run.sh` 完成检查、解压、患者级划分、冻结特征缓存、共同参考集建库、三组实验及**唯一指标汇总文件** `outputs/full/experiment_results.json`。再次运行复用特征缓存。可用 `bash run.sh --max-cases 8 --slice-stride 4` 快速诊断（调试结果：`outputs/debug_8/experiment_results.json`，**不能作为正式论文结果**）。
 5. `python -m pytest -q` 验证算法级测试；`python scripts/matlab_parity.py --help` 说明 MATLAB 一致性验证流程。
 
-**所有运行参数：** `bash run.sh --help`。建议正式实验传入 `--slice-stride 1`，默认 `--slice-stride 4` 仅用于快速初验；指标明确报告评估覆盖的切片数和患癌阳性像素数。
+**所有运行参数：** `bash run.sh --help`。默认 `--slice-stride 1` 对全部切片评估；快速初验请显式传入 `--max-cases 8 --slice-stride 4`；指标明确报告评估覆盖的切片数和患癌阳性像素数。
 
 ### 实验结果：只回传一个 JSON 文件（不会上传 GitHub）
 
