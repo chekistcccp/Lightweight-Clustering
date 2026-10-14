@@ -34,10 +34,27 @@ def torque_approx(features: np.ndarray, max_clusters: int = 12, fixed_k: int = 0
         raise ValueError("TORC-inspired exact distance graph capped at 1024 points")
     if fixed_k < 0 or fixed_k >= n:
         raise ValueError("fixed_k must be 0 (automatic) or an integer 1..N-1")
+    return torque_from_distance(cosine_distances(x), max_clusters=max_clusters, fixed_k=fixed_k)
+
+
+def torque_from_distance(distance_matrix: np.ndarray, max_clusters: int = 12,
+                         fixed_k: int = 0) -> TorqueResult:
+    """Direct distance-matrix interface for testing against MATLAB golden data.
+
+    Approximate TORC-inspired merger, NOT identical to official .p/MEX code.
+    """
+    d0 = np.asarray(distance_matrix, dtype=np.float32)
+    if d0.ndim != 2 or d0.shape[0] != d0.shape[1]:
+        raise ValueError("Input distance matrix must be square")
+    n = len(d0)
+    if n < 3 or n > 1024 or not np.isfinite(d0).all() or (d0 < -1e-5).any():
+        raise ValueError("Distance matrix invalid or number of points outside 3..1024")
+    if fixed_k < 0 or fixed_k >= n:
+        raise ValueError("fixed_k must be 0 or an integer 1..N-1")
     dm = np.full((2 * n, 2 * n), np.inf, dtype=np.float32)
-    d0 = cosine_distances(x).astype(np.float32)
-    np.fill_diagonal(d0, np.inf)
-    dm[:n, :n] = np.maximum(d0, 0.0)
+    dist = np.maximum(d0.copy(), 0.0)
+    np.fill_diagonal(dist, np.inf)
+    dm[:n, :n] = dist
     sizes = np.zeros(2 * n, dtype=np.int32)
     sizes[:n] = 1
     alive = list(range(n))
