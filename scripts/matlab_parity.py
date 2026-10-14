@@ -14,8 +14,7 @@ import json
 import numpy as np
 from scipy.io import loadmat
 from sklearn.metrics import adjusted_rand_score
-from sklearn.manifold import MDS
-from lightweight_clustering.torc_approx import torque_approx
+from lightweight_clustering.torc_approx import torque_from_distance
 
 
 def main():
@@ -30,18 +29,16 @@ def main():
     gt=np.asarray(data["Idx"]).ravel()
     if dm.shape != (len(gt),len(gt)):
         raise ValueError("Invalid MATLAB distance/label shape")
-    # Build a faithful Euclidean embedding of the supplied distances as an
-    # approximate comparison only; cosine inputs cannot be recovered exactly.
-    eigenvals,eigenvectors=np.linalg.eigh(-0.5*(np.eye(len(gt))-
-                 np.ones_like(dm)/len(gt))@(dm**2)@(np.eye(len(gt))-
-                 np.ones_like(dm)/len(gt)))
-    pos=np.maximum(eigenvals,0)
-    x=eigenvectors*np.sqrt(pos)[None,:]
-    pred=torque_approx(x,fixed_k=len(np.unique(gt))).labels
-    ari=float(adjusted_rand_score(gt,pred))
-    result={"ARI_vs_MATLAB_labels":ari,
-            "same_partition":bool(abs(ari-1.0)<1e-12),
-            "warning":"NOT an exact parity test of original DM: metric embedding followed by cosine distance changes geometry. Strict parity requires a direct distance-matrix implementation."}
+    automatic = torque_from_distance(dm).labels
+    forced = torque_from_distance(dm,fixed_k=len(np.unique(gt))).labels
+    ari_auto=float(adjusted_rand_score(gt,automatic))
+    ari_fixed=float(adjusted_rand_score(gt,forced))
+    result={"ARI_auto_vs_MATLAB":ari_auto,
+            "ARI_fixed_K_vs_MATLAB":ari_fixed,
+            "auto_clusters":int(len(np.unique(automatic))),
+            "matlab_clusters":int(len(np.unique(gt))),
+            "same_partition_auto":bool(abs(ari_auto-1.0)<1e-12),
+            "warning":"Uses identical input DM but DIFFERENT independent TORC-inspired algorithm; ARI=1 on one case does not establish general MATLAB parity."}
     from pathlib import Path
     out=Path(args.output);out.parent.mkdir(parents=True,exist_ok=True)
     out.write_text(json.dumps(result,indent=2),encoding="utf-8")
