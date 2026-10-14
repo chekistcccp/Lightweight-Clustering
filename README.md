@@ -15,6 +15,7 @@
 **所有运行参数：** `bash run.sh --help`。建议正式实验传入 `--slice-stride 1`，默认 `--slice-stride 4` 仅用于快速初验；指标明确报告评估覆盖的切片数和患癌阳性像素数。
 
 ### 输出结构
+完整运行结果在 \`outputs/full/\`，\`--max-cases N\` 的调试运行在 \`outputs/debug_N/\`，二者严格隔离。下面的文件路径相对于该实验输出目录：
 - `outputs/split.json`：固定的患者级划分（seed 42），防止跨患者数据泄漏。
 - `outputs/cache/*.npz`：提取后的归一化 Patch 特征、切片索引；缓存与原始影像掩码分离。
 - `outputs/predictions/{method}/{patient}.npz`：每个患者的低分辨率得分图 + z 切片索引。
