@@ -34,3 +34,8 @@ ModelScope `timm/tf_mobilenetv3_small_minimal_100.in1k`；固定 out_indices=(1,
 
 ## 性能/资源限界
 N×N 内存为 O(N²)；矩阵 512×512 float32 大约1 MiB，本实现另外分配 1024×1024，并逐步凝聚，时间显著高于标准 KNN。严禁未经说明对数万 Patch 直接运行这个版本。
+
+## 统一指标报告与隐私交付（2026-10-14 更新）
+正式结果唯一需回传的文件：`outputs/full/experiment_results.json`。按病例记录各方法的 Pixel AUROC/AP、Dice/IoU/Precision/Recall/FPR@top5%、TP/FP/FN/TN；各方法按患者 macro 描述统计，配对 delta、簇结构、时间、环境、版本及数据拆分汇入同一 JSON。任何无定义指标用 JSON null，不得使用 0 或推测数值代替。
+输入图像、掩码、预测图、特征张量不能出现在这一 JSON；默认不产生预测图像，显式 `--save-predictions` 只允许本机存储。
+所有实验指标和日志只能保存在用户本机，**不能同步/提交 GitHub，不能被 GitHub Actions 上传**；仅由用户手动附加 JSON 到当前 ChatGPT 会话分析。
