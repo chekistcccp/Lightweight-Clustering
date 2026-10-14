@@ -1,0 +1,18 @@
+name: Unit tests
+on:
+  push:
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Minimal test dependencies
+        run: python -m pip install numpy scipy scikit-learn pytest
+      - name: Python syntax check
+        run: python -m compileall -q lightweight_clustering scripts tests
+      - name: Unit tests
+        run: python -m pytest -q
