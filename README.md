@@ -26,7 +26,7 @@ outputs/full/experiment_results.json
 
 当前已实现数值指标：**全图 + HU 体部 ROI** 的 Pixel AUROC、Pixel AP；预先固定 Top0.1%、Top0.5%、Top1%、Top5% 的 Dice、IoU、Precision、Recall、FPR 和 TP/FP/FN/TN；每病例体部占比、体部 GT 肿瘤覆盖、21 个数值 PR 点。提供病例 macro mean/std/median/min/max/n、配对 delta、分簇诊断、用时及峰值显存。没有实现的 AUPRO 和患者级正常/癌症 AUROC 不会被伪造。
 
-实验过程中的本地文件包括 `outputs/full/split.json` 与 `outputs/full/cache/`（运算缓存，不属于需要回传的实验指标）。默认**不保存预测图像/热力图**。只有显式加入 `--save-predictions` 才会额外存本地 `outputs/full/predictions/*.npz`，它们不会进入 JSON，且同样不能提交 Git。旧版本生成的 `metrics/*.csv`、`summary.json` 等文件不会被新版本重新生成，如本地还存在可自行删除。
+已有正式 JSON 在重新运行前会自动移动到本机 `outputs/history/` 内的时间戳文件夹，避免新运行失败时丢失上一份结果。历史文件同样受到 Git 忽略保护，只在用户本机保留。\n\n实验过程中的本地文件包括 `outputs/full/split.json` 与 `outputs/full/cache/`（运算缓存，不属于需要回传的实验指标）。默认**不保存预测图像/热力图**。只有显式加入 `--save-predictions` 才会额外存本地 `outputs/full/predictions/*.npz`，它们不会进入 JSON，且同样不能提交 Git。旧版本生成的 `metrics/*.csv`、`summary.json` 等文件不会被新版本重新生成，如本地还存在可自行删除。
 
 - `outputs/`、`data/`、`model/` 已被 Git 忽略，附加全路径忽略规则防止将 JSON 拷贝到仓库其他位置后误提交；**程序不调用 git add、commit、push，也不会创建 Release/Actions artifact。**
 - 可选的提交前保护（在 WSL 克隆的仓库内手动执行一次）：
