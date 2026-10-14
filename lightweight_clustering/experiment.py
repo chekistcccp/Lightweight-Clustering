@@ -89,20 +89,30 @@ def locate_data(root: Path):
     pairs = find()
     if pairs:
         return pairs
-    archive_list = sorted(f for f in root.rglob("*") if f.is_file() and (
-        f.suffix.lower() in (".tar", ".zip", ".tgz") or f.name.endswith(".tar.gz")
-    ) and "extracted" not in f.parts)
+    # Up to 3 extraction passes handle archives nested inside the original archive.
     extracted = root / "extracted"
-    for archive in archive_list:
-        marker = extracted / (hashlib.sha256(str(archive.resolve()).encode()).hexdigest()[:16] + ".done")
-        if not marker.exists():
+    for _pass in range(3):
+        archive_list = sorted(f for f in root.rglob("*") if f.is_file() and (
+            f.suffix.lower() in (".tar", ".zip", ".tgz") or f.name.endswith(".tar.gz")
+        ))
+        changed = False
+        for archive in archive_list:
+            marker_id = hashlib.sha256(
+                (str(archive.resolve()) + ":" + str(archive.stat().st_size)).encode()
+            ).hexdigest()[:16]
+            marker = extracted / (marker_id + ".done")
+            if marker.exists():
+                continue
             print("[extract]", archive)
             safe_extract(archive, extracted)
             marker.parent.mkdir(parents=True, exist_ok=True)
             marker.write_text(str(archive.stat().st_size), encoding="utf-8")
-        pairs = find()
-        if pairs:
-            return pairs
+            changed = True
+            pairs = find()
+            if pairs:
+                return pairs
+        if not changed:
+            break
     raise FileNotFoundError("No MSD imagesTr/labelsTr pairs found in " + str(root) +
                             "; put original Task10_Colon archive into data/archives/")
 
@@ -190,7 +200,7 @@ def load_backbone(args):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     net = net.to(device)
     print("[backbone]", MODEL_NAME, "device", device, "loaded keys", len(keys))
-    return net, device, (path.stat().st_size, path.name)
+    return net, device, (path.stat().st_size, path.stat().st_mtime_ns, path.name)
 
 
 def extract_case(imgpath: Path, model, device, args, cache_dir: Path, fingerprint: str):
