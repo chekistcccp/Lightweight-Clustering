@@ -36,3 +36,14 @@
 - E0–E4 固定相同患者拆分、冻结 MobileNetV3、窗位和 kNN K=5；不得根据测试掩码选择池化层、面积阈值或系数。可使用 body ROI，但它完全由 CT HU 确定，不能使用 GT。
 - 全图和体部内的 Pixel AUROC/AP 分开报告；面积预算 Top0.1%、0.5%、1%、5% 固定，并输出 Dice/IoU/Precision/Recall/FPR 和 TP/FP/FN/TN。21点数值 PR 曲线不生成图。须记录被体部掩码排除的 GT 肿瘤像素数。
 - 本地 `outputs/full/experiment_results.json` 是唯一需要回传的汇总报告，仍**严禁任何真实指标或结果通过仓库/Issue/PR/Actions/Release 同步**。
+
+## V3：2026-10-15 进一步实验（取代V2作为默认入口）
+- **默认一键运行**：`run.sh` 指向 `lightweight_clustering.v3_experiment`。V2 保留作历史对照代码，不是目前的默认实验。
+- 实验总共8组：`patch_knn`、`body_patch_knn`（随机512）、`body_diverse_512`（多样性512）、`body_random_8192`（随机8192）、`diverse_patch_knn`（多样性8192）、`torc_approx`、`local_consensus_knn`、`torc_consensus`。
+- 2×2析因需相同患者、相同冻结特征、相同CT体部ROI，512点必须从同方法8192点的大型候选库按患者轮转取前512点；对患者逐例计算 bank_size、diversity 的主效应及交互项；不要把同时改变库容量和采样方式的E1→E2变化直接归因于任何一个单独因素。
+- 替换无效的全局Consensus：新评分为**查询Patch周围16个参考邻居**的距离加权同患者集中度，与全局TORC簇是否覆盖101人无关。独立测试局部评分、TORC评分、两者结合（共享8192库）；记录局部支持度分布，如完全无方差须说明模块没有信息增益，不能写为有效创新。
+- `--sampling-seeds 42 123 2026` 为默认；**患者划分始终固定在 `--seed 42`**。不同seed仅反映参考库采样方差，不等于新患者或跨中心独立验证，更不能把25患者×3抽样等同75独立患者。
+- 先 `bash run.sh --max-cases 8 --slice-stride 4 --sampling-seeds 42`，后 `bash run.sh`。输入数据和ModelScope权重由原规则提供。保持预训练网络、K=5、体部HU门限以及Top-k预算不随测试标签变动。
+- 一份完整V3报告为 `outputs/full/experiment_results.json`（schema 3.0.0），包含8方法×全部采样seed的患者级指标、每seed宏平均、析因主效应/交互项、跨seed描述统计、局部患者支持诊断和完整数值PR采样。报告中**绝不允许**CT、mask、热力图、特征阵或预测像素阵。
+- **严禁任何真实实验结果数据被同步到 GitHub**，包括报告JSON、患者指标、GitHub Actions logs/artifacts、Issue/PR文字、文档图表、Release。只提交公开代码/测试中的合成数字。用户只把本机JSON手动传回当前对话。
+- 真实数据尚未在此版本运行，GitHub CI通过只证明无真实数据的Python/合成单测通过，不能假称V3已经取得性能提升。
