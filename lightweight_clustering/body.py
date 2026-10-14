@@ -31,14 +31,19 @@ def ct_body_mask(ct_slice: np.ndarray, size: int = 224, hu_threshold: float = -5
 
 
 def patch_body_occupancy(mask, patch_grid: int = 14):
-    """Coverage fractions over each 2D CNN patch, not a tumor mask."""
-    import torch
-    import torch.nn.functional as F
-    if patch_grid < 1:
-        raise ValueError("patch_grid must be positive")
-    m=torch.from_numpy(np.asarray(mask,dtype=np.float32))[None,None]
-    out=F.adaptive_avg_pool2d(m,(patch_grid,patch_grid))
-    return out[0,0].numpy()
+    """Coverage fractions per patch from a summed-area table, NumPy-only."""
+    m=np.asarray(mask,dtype=np.float32)
+    if m.ndim!=2 or patch_grid<1 or patch_grid>min(m.shape):
+        raise ValueError("Invalid body mask / patch_grid")
+    h,w=m.shape
+    ys=np.linspace(0,h,patch_grid+1).astype(np.int64)
+    xs=np.linspace(0,w,patch_grid+1).astype(np.int64)
+    integral=np.pad(m,((1,0),(1,0))).cumsum(axis=0).cumsum(axis=1)
+    y0,y1=ys[:-1,None],ys[1:,None]
+    x0,x1=xs[None,:-1],xs[None,1:]
+    sums=integral[y1,x1]-integral[y0,x1]-integral[y1,x0]+integral[y0,x0]
+    area=(y1-y0)*(x1-x0)
+    return sums/np.maximum(area,1)
 
 
 def body_patch_candidate_mask(img, zs, *, patch_grid=14, input_size=224,
