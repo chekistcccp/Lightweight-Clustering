@@ -208,7 +208,17 @@ def run():
     out.mkdir(parents=True,exist_ok=True)
     target=out/"experiment_results.json"
     ensure_not_git_trackable(target)
-    target.unlink(missing_ok=True)
+    if target.exists():
+        # Keep the prior user's report locally, including if this run fails.
+        # History remains under ignored outputs/ and is NEVER sent to GitHub.
+        stamp=time.strftime("%Y%m%d_%H%M%S",time.gmtime())
+        history=Path(args.output)/"history"/(out.name+"_"+stamp)/"experiment_results.json"
+        ensure_not_git_trackable(history)
+        history.parent.mkdir(parents=True,exist_ok=True)
+        if history.exists():
+            raise FileExistsError("Result history collision: "+str(history))
+        target.replace(history)
+        print("[previous report archived locally]",history,flush=True)
     train,test=split_cases(pairs,out/"split.json",args.seed,args.test_fraction)
     timings={}
     t=time.perf_counter()
