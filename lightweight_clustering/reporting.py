@@ -14,10 +14,9 @@ import tempfile
 
 import numpy as np
 
-METRICS = (
-    "pixel_auroc", "pixel_ap", "dice_at_top5", "iou_at_top5",
-    "precision_at_top5", "recall_at_top5", "fpr_at_top5",
-)
+from .metrics_v2 import numeric_fields
+
+METRICS = numeric_fields()
 FORBIDDEN_KEYS = frozenset({"image", "images", "mask", "masks", "score_grid",
                             "heatmap", "heatmaps", "features", "raw_volume",
                             "predictions", "voxel_array"})
@@ -74,7 +73,10 @@ def aggregate(methods, rows):
                     evaluated_slices=sum(int(r["slices"]) for r in selected),
                     positive_pixels=sum(int(r["positive_pixels"]) for r in selected),
                     negative_pixels=sum(int(r["negative_pixels"]) for r in selected),
-                    patients_without_positive_pixels=sum(int(r["positive_pixels"] == 0) for r in selected))
+                    patients_without_positive_pixels=sum(int(r["positive_pixels"] == 0) for r in selected),
+                    body_valid_pixels=sum(int(r.get("body_valid_pixels",0)) for r in selected),
+                    body_excluded_positive_pixels=sum(
+                        int(r.get("body_excluded_positive_pixels",0)) for r in selected))
         for metric in METRICS:
             vals = [float(r[metric]) for r in selected if r.get(metric) is not None]
             data[metric] = describe(vals)
@@ -148,13 +150,15 @@ def export_report(target, *, methods, rows, metadata, diagnostics, timings,
     if not set(next(iter(patients.values()))) == set(splits["test"]):
         raise ValueError("Missing/extra test patients in result report")
     payload = dict(
-        report_schema_version="1.0.0", status="completed",
+        report_schema_version="2.0.0", status="completed",
         started_at_utc=started_at,
         completed_at_utc=completed_at or utc_timestamp(),
         task="abnormal-only colorectal CT pixel localization",
         contains_images=False, contains_pixel_arrays=False,
         main_result_file="experiment_results.json",
-        reporting_note="All numeric results in this one local JSON; images/CT/heatmaps excluded",
+        reporting_note=("All numerical measurements, full/body ROI, top-area budgets, "
+                        "paired deltas and sampled numeric PR points in this one local JSON; "
+                        "CT, images, pixel heatmaps and feature tensors excluded"),
         metadata=metadata,
         patient_split=dict(seed=splits["seed"], train_count=len(splits["train"]),
                            test_count=len(splits["test"]),
@@ -173,14 +177,23 @@ def export_report(target, *, methods, rows, metadata, diagnostics, timings,
             recall_at_top5="Recall of highest-scored 5% pixels per patient",
             fpr_at_top5="False positive rate among negatives at top-5% cutoff",
             aggregate="Patient-level macro unweighted descriptive statistics",
-            paired_deltas="Paired per-patient differences; not a hypothesis test"
+            paired_deltas="Paired per-patient differences; not a hypothesis test",
+            top_area_budgets="top0p1=0.1%, top0p5=0.5%, top1=1%, top5=5% of selected ROI pixels",
+            body_metrics="Metric names prefixed body_ use HU-derived body pixels as evaluation ROI",
+            full_metrics="Unprefixed metrics use entire axial image",
+            pr_curve="21 sampled numerical (recall,precision) points per case; NOT plotted images",
+            body_mask_area_fraction="Fraction of all evaluated image pixels covered by HU-derived body",
+            tumor_coverage_by_body="Fraction of GT positive pixels falling inside HU-derived body; evaluation-only",
+            full_score_policy="Body-aware method scores below minimum body score outside the body for full frame comparison"
         ),
         limitations=[
             "The official TORC MATLAB P-code was not ported or proven equivalent; independent approximation",
             "All CT patients are tumor-positive: no patient-level healthy-vs-cancer AUROC",
             "GT masks used only after scoring for evaluation; 2D resampled pixel metrics",
             "Debug subsamples and stride>1 must not be interpreted as full-data results",
-            "No image files, raw voxel arrays, heatmaps, or feature tensors in this report"
+            "No image files, raw voxel arrays, heatmaps, or feature tensors in this report",
+            "Pixel AP and AUROC should be compared on the same ROI; full/body results are different evaluation populations",
+            "Fixed top-area thresholds are exploratory and are not chosen using ground-truth test masks"
         ],
     )
     serializable = clean_json(payload)
