@@ -84,3 +84,10 @@ def test_report_filename_fixed(tmp_path):
     _,args=base_report(tmp_path)
     with pytest.raises(ValueError,match="filename"):
         export_report(tmp_path/"results.json",**args)
+
+def test_default_run_evaluates_all_slices():
+    from lightweight_clustering.experiment import parser
+    args=parser().parse_args([])
+    assert args.slice_stride == 1
+    assert args.max_cases == 0
+    assert args.save_predictions is False
